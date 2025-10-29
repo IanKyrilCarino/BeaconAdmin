@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BEACON Notifications</title> <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            primary: "#007BFF", // Your blue color
+            "background-light": "#F8F9FA",
+            "background-dark": "#1A202C",
+            // Added colors for notification types (adjust as needed)
+            "notif-info-bg-light": "bg-blue-50",
+            "notif-info-icon-light": "text-blue-500",
+            "notif-info-bg-dark": "dark:bg-blue-900/50",
+            "notif-info-icon-dark": "dark:text-blue-300",
+            "notif-success-bg-light": "bg-green-50",
+            "notif-success-icon-light": "text-green-500",
+            "notif-success-bg-dark": "dark:bg-green-900/50",
+            "notif-success-icon-dark": "dark:text-green-300",
+            "notif-warning-bg-light": "bg-yellow-50",
+            "notif-warning-icon-light": "text-yellow-500",
+            "notif-warning-bg-dark": "dark:bg-yellow-900/50",
+            "notif-warning-icon-dark": "dark:text-yellow-300",
+          },
+          fontFamily: {
+            display: ["Inter", "sans-serif"],
+          },
+          borderRadius: {
+            DEFAULT: "0.5rem",
+          },
+        },
+      },
+    };
+  </script>
+
+  <script>
+    if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  </script>
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+
+ </head>
+
+<body class="bg-background-light dark:bg-background-dark font-display text-gray-800 dark:text-gray-200">
+  <div class="flex flex-col h-screen">
+
+    <div class="w-full bg-gray-900 text-white flex justify-between items-center px-6 py-4 shadow-md">
+      <a href="index.html" class="flex flex-col">
+        <h5 class="text-[4rem] font-bold leading-none">BEACON</h5>
+        <p class="text-xs text-gray-300">Reporting and Information Management System</p>
+      </a>
+      <div id="profileDropdownWrapper" class="relative">
+          <div id="profileTrigger" class="flex items-center space-x-3 cursor-pointer">
+              <img id="adminProfile" src="https://via.placeholder.com/40" alt="Admin Profile"
+                   class="w-10 h-10 rounded-full border-2 border-white object-cover" />
+              <span id="adminName" class="font-semibold text-white">ADMIN</span>
+          </div>
+          <div id="profileDropdown"
+               class="hidden absolute right-0 mt-3 w-48 bg-white dark:bg-gray-700 rounded-lg shadow-xl z-50 ring-1 ring-black ring-opacity-5">
+               <div class="py-1">
+                   <a href="#" id="openProfileModalBtn"
+                      class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600">
+                       Update Profile
+                   </a>
+                   <a href="login.html" id="logoutBtn"
+                      class="block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-600">
+                       Logout
+                   </a>
+               </div>
+          </div>
+      </div>
+    </div>
+
+    <div class="flex flex-1 overflow-hidden">
+
+      <aside class="w-64 bg-white dark:bg-gray-800 flex flex-col shadow-lg">
+      <nav class="flex-1 px-4 py-6 space-y-2">
+          <a href="index.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+          <span class="material-icons">dashboard</span>
+          <span class="ml-3">Dashboard</span>
+          </a>
+          <a href="reports.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+          <span class="material-icons">assessment</span>
+          <span class="ml-3">Reports</span>
+          </a>
+          <a href="outages.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+          <span class="material-icons">warning</span>
+          <span class="ml-3">Outages</span>
+          </a>
+          <a href="map.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+          <span class="material-icons">map</span>
+          <span class="ml-3">Map View</span>
+          </a>
+          <a href="notifications.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg bg-primary text-white">
+          <span class="material-icons">notifications</span>
+          <span class="ml-3">Notifications</span>
+          </a>
+          <a href="settings.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+          <span class="material-icons">settings</span>
+          <span class="ml-3">Settings</span>
+          </a>
+      </nav>
+      </aside>
+
+      <div class="flex-1 flex flex-col">
+        <main class="flex-1 p-8 overflow-y-auto">
+
+          <div class="flex justify-between items-center mb-6 border-b dark:border-gray-700 pb-4">
+            <h2 class="text-3xl font-bold text-gray-800 dark:text-white">Notifications</h2>
+            <div class="flex items-center space-x-3">
+               <div class="flex space-x-1 p-0.5 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                   <button id="filterAllBtn" class="px-3 py-1 text-sm font-medium rounded-md bg-white dark:bg-gray-800 shadow text-blue-600 dark:text-blue-300">All</button>
+                   <button id="filterUnreadBtn" class="px-3 py-1 text-sm font-medium rounded-md text-gray-500 dark:text-gray-400 hover:bg-white/50 dark:hover:bg-gray-800/50">Unread</button>
+                   </div>
+               <button id="markAllReadBtn" class="px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/50 rounded-lg transition-colors flex items-center space-x-1">
+                   <span class="material-icons text-base">done_all</span>
+                   <span>Mark All as Read</span>
+                </button>
+            </div>
+          </div>
+
+          <div id="notification-feed" class="space-y-4">
+             <div id="feed-placeholder" class="text-center py-10 text-gray-500 dark:text-gray-400">
+                Loading notifications...
+             </div>
+          </div>
+
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <template id="notification-card-template">
+    <div class="notification-card flex items-start p-4 bg-white dark:bg-gray-800 rounded-lg shadow border-l-4" data-notif-id=""> <span class="unread-dot w-2 h-2 bg-blue-500 rounded-full mr-3 mt-1.5 flex-shrink-0" title="Unread"></span>
+       <div class="notif-icon-wrapper flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center mr-4"> <span class="material-icons notif-icon"></span> </div>
+       <div class="flex-1">
+          <p class="notif-message text-sm text-gray-800 dark:text-gray-100 leading-relaxed"></p> <p class="notif-timestamp text-xs text-gray-500 dark:text-gray-400 mt-1"></p> </div>
+       </div>
+  </template>
+
+
+  <div id="profileModal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden items-center justify-center z-[1001]"> <div class="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-md p-6 relative">
+      <div class="flex justify-between items-center pb-3 border-b dark:border-gray-700">
+          <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Update Profile Settings</h3>
+          <button id="closeProfileModalBtn" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                   xmlns="http://www.w3.org/2000/svg">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+          </button>
+      </div>
+      <form id="profileUpdateForm" class="mt-4 space-y-4">
+          <div>
+              <label for="profilePicture" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Profile Picture</label>
+              <input type="file" id="profilePictureInput"
+                     class="mt-1 block w-full text-sm text-gray-900 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 focus:outline-none"
+                     accept="image/*">
+          </div>
+          <div>
+              <label for="nickname" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Nickname (Display Name)</label>
+              <input type="text" id="nicknameInput" value="ADMIN"
+                     class="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                     placeholder="Enter your nickname">
+          </div>
+          <div>
+              <label for="password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">New Password</label>
+              <input type="password" id="passwordInput"
+                     class="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                     placeholder="Leave blank to keep current password">
+          </div>
+          <div class="pt-4 flex justify-end space-x-3">
+              <button type="button" id="cancelUpdateBtn" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition">
+                  Cancel
+              </button>
+              <button type="submit" id="saveProfileBtn" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition">
+                  Save Changes
+              </button>
+          </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="scripts/supabase.js"></script>
+  <script src="scripts/shared.js"></script>
+  <script src="scripts/notifications.js" defer></script> </body>
+</html>

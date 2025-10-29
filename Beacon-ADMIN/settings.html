@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BEACON Settings</title>
+
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            primary: "#007BFF",
+            "background-light": "#F8F9FA",
+            "background-dark": "#1A202C",
+          },
+          fontFamily: {
+            display: ["Inter", "sans-serif"],
+          },
+          borderRadius: {
+            DEFAULT: "0.5rem",
+          },
+        },
+      },
+    };
+  </script>
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+
+</head>
+
+<body class="bg-background-light dark:bg-background-dark font-display text-gray-800 dark:text-gray-200">
+  
+  <script>
+    if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  </script>
+
+  <div class="flex flex-col h-screen">
+
+    <div class="w-full bg-gray-900 text-white flex justify-between items-center px-6 py-4 shadow-md">
+      <a href="index.html" class="flex flex-col">
+        <h5 class="text-[4rem] font-bold leading-none">BEACON</h5>
+        <p class="text-xs text-gray-300">Reporting and Information Management System</p>
+      </a>
+      <div id="profileDropdownWrapper" class="relative">
+          <div id="profileTrigger" class="flex items-center space-x-3 cursor-pointer">
+              <img id="adminProfile" src="https://via.placeholder.com/40" alt="Admin Profile"
+                   class="w-10 h-10 rounded-full border-2 border-white object-cover" />
+              <span id="adminName" class="font-semibold text-white">ADMIN</span>
+          </div>
+          <div id="profileDropdown"
+               class="hidden absolute right-0 mt-3 w-48 bg-white dark:bg-gray-700 rounded-lg shadow-xl z-50 ring-1 ring-black ring-opacity-5">
+               <div class="py-1">
+                   <a href="#" id="openProfileModalBtn"
+                      class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600">
+                       Update Profile
+                   </a>
+                   <a href="login.html" id="logoutBtn"
+                      class="block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-600">
+                       Logout
+                   </a>
+               </div>
+          </div>
+      </div>
+    </div>
+
+    <div class="flex flex-1 overflow-hidden">
+        <aside class="w-64 bg-white dark:bg-gray-800 flex flex-col shadow-lg">
+        <nav class="flex-1 px-4 py-6 space-y-2">
+            <a href="index.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+            <span class="material-icons">dashboard</span>
+            <span class="ml-3">Dashboard</span>
+            </a>
+            <a href="reports.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+            <span class="material-icons">assessment</span>
+            <span class="ml-3">Reports</span>
+            </a>
+            <a href="outages.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+            <span class="material-icons">warning</span>
+            <span class="ml-3">Outages</span>
+            </a>
+            <a href="map.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+            <span class="material-icons">map</span>
+            <span class="ml-3">Map View</span>
+            </a>
+            <a href="notifications.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+            <span class="material-icons">notifications</span>
+            <span class="ml-3">Notifications</span>
+            </a>
+            <a href="settings.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg bg-primary text-white">
+            <span class="material-icons">settings</span>
+            <span class="ml-3">Settings</span>
+            </a>
+        </nav>
+        </aside>
+
+      <div class="flex-1 flex flex-col">
+        <main class="flex-1 p-8 overflow-y-auto">
+
+          <h2 class="text-3xl font-bold text-gray-800 dark:text-white mb-8">Settings</h2>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <div class="lg:col-span-1">
+              <div class="sticky top-8 bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Navigation</h3>
+                <nav class="space-y-2">
+                  <a href="#general" class="flex items-center space-x-3 px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">
+                    <span class="material-icons text-gray-500">tune</span>
+                    <span>General</span>
+                  </a>
+                  <a href="#configuration" class="flex items-center space-x-3 px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">
+                    <span class="material-icons text-gray-500">build_circle</span>
+                    <span>Configuration</span>
+                  </a>
+                  <a href="#notifications" class="flex items-center space-x-3 px-3 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">
+                    <span class="material-icons text-gray-500">notifications</span>
+                    <span>Notifications</span>
+                  </a>
+                </nav>
+              </div>
+            </div>
+
+            <div class="lg:col-span-2 space-y-8">
+              
+              <section id="general">
+                <h3 class="text-2xl font-semibold text-gray-900 dark:text-white mb-4">General</h3>
+                <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md space-y-6">
+                  <div>
+                    <h4 class="text-lg font-medium text-gray-800 dark:text-gray-200">Appearance</h4>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mb-3">Choose your preferred system theme.</p>
+                    <div class="flex space-x-2 p-1 bg-gray-100 dark:bg-gray-700 rounded-lg">
+                      <button id="theme-light" class="theme-btn flex-1 flex items-center justify-center space-x-2 px-4 py-2 rounded-md text-sm font-medium">
+                        <span class="material-icons text-base">light_mode</span>
+                        <span>Light</span>
+                      </button>
+                      <button id="theme-dark" class="theme-btn flex-1 flex items-center justify-center space-x-2 px-4 py-2 rounded-md text-sm font-medium">
+                        <span class="material-icons text-base">dark_mode</span>
+                        <span>Dark</span>
+                      </button>
+                      <button id="theme-system" class="theme-btn flex-1 flex items-center justify-center space-x-2 px-4 py-2 rounded-md text-sm font-medium">
+                        <span class="material-icons text-base">desktop_windows</span>
+                        <span>System</span>
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <h4 class="text-lg font-medium text-gray-800 dark:text-gray-200">Profile</h4>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mb-3">Update your nickname, profile picture, and password.</p>
+                    <button id="openProfileModalBtnSettings" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition">
+                      Open Profile Settings
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section id="configuration">
+                <h3 class="text-2xl font-semibold text-gray-900 dark:text-white mb-4">System Configuration</h3>
+                <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
+                  <h4 class="text-lg font-medium text-gray-800 dark:text-gray-200">Manage System Data</h4>
+                  <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Add, edit, or remove feeder groups and dispatch teams. Requires admin password.</p>
+                  <div class="space-y-3">
+                    <button id="manageFeedersBtn" class="w-full text-left px-4 py-3 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition flex justify-between items-center">
+                      <span class="font-medium text-gray-700 dark:text-gray-200">Manage Feeder Groups</span>
+                      <span class="material-icons text-gray-500">chevron_right</span>
+                    </button>
+                    <button id="manageTeamsBtn" class="w-full text-left px-4 py-3 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition flex justify-between items-center">
+                      <span class="font-medium text-gray-700 dark:text-gray-200">Manage Dispatch Teams</span>
+                      <span class="material-icons text-gray-500">chevron_right</span>
+                    </button>
+                  </div>
+                </div>
+              </section>
+              
+              <section id="notifications">
+                <h3 class="text-2xl font-semibold text-gray-900 dark:text-white mb-4">Notification Preferences</h3>
+                <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md divide-y dark:divide-gray-700">
+                  <label for="notif-new" class="flex justify-between items-center py-3 cursor-pointer">
+                    <div>
+                      <h4 class="font-medium text-gray-800 dark:text-gray-200">New Outage Reported</h4>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Send an email when a new outage is reported.</p>
+                    </div>
+                    <input type="checkbox" id="notif-new" class="form-checkbox h-5 w-5 text-blue-600 rounded-full" checked>
+                  </label>
+                  <label for="notif-eta" class="flex justify-between items-center py-3 cursor-pointer">
+                    <div>
+                      <h4 class="font-medium text-gray-800 dark:text-gray-200">ETA Updated</h4>
+                      <p class="text-sm text-gray-500 dark:text-gray-400">Send an email when an ETA is updated.</p>
+                    </div>
+                    <input type="checkbox" id="notif-eta" class="form-checkbox h-5 w-5 text-blue-600 rounded-full">
+                  </label>
+                </div>
+              </section>
+            </div>
+
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <div id="profileModal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden items-center justify-center z-[1001]">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-md p-6 relative">
+        <div class="flex justify-between items-center pb-3 border-b dark:border-gray-700">
+            <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Update Profile Settings</h3>
+            <button id="closeProfileModalBtn" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                     xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+        <form id="profileUpdateForm" class="mt-4 space-y-4">
+            <div>
+              <label for="profilePictureInput" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Profile Picture</label>
+              <input type="file" id="profilePictureInput" class="mt-1 block w-full text-sm text-gray-900 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 focus:outline-none" accept="image/*">
+            </div>
+            <div>
+              <label for="nicknameInput" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Nickname (Display Name)</label>
+              <input type="text" id="nicknameInput" value="ADMIN" class="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white" placeholder="Enter your nickname">
+            </div>
+            <div>
+              <label for="passwordInput" class="block text-sm font-medium text-gray-700 dark:text-gray-300">New Password</Dabel>
+              <input type="password" id="passwordInput" class="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white" placeholder="Leave blank to keep current password">
+            </div>
+            <div class="pt-4 flex justify-end space-x-3">
+                <button type="button" id="cancelUpdateBtn" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition">Cancel</button>
+                <button type="submit" id="saveProfileBtn" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition">Save Changes</button>
+            </div>
+        </form>
+    </div>
+  </div>
+
+  <div id="adminAuthModal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden items-center justify-center z-[1002]">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-sm p-6 relative">
+      <div class="flex justify-between items-center pb-3 border-b dark:border-gray-700">
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Admin Verification</h3>
+        <button id="closeAuthModalBtn" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+          <span class="material-icons">close</span>
+        </button>
+      </div>
+      <form id="adminAuthForm" class="mt-4 space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-300">Please enter your password to continue.</p>
+        <div>
+          <label for="adminAuthPassword" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Password</label>
+          <input type="password" id="adminAuthPassword" class="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white" required>
+          <p id="authError" class="text-sm text-red-500 mt-1"></p>
+        </div>
+        <div class="pt-4 flex justify-end space-x-3">
+          <button type="button" id="cancelAuthBtn" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition">
+            Cancel
+          </button>
+          <button type="submit" id="confirmAuthBtn" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition">
+            Confirm
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+  
+  <div id="feederModal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden items-center justify-center z-[1003] p-4">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div class="flex justify-between items-center p-6 border-b dark:border-gray-700">
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Manage Feeder Groups</h3>
+        <button id="closeFeederModalBtn" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><span class="material-icons">close</span></button>
+      </div>
+      <div class="p-6 overflow-y-auto space-y-6">
+        <form id="feederForm" class="p-4 border rounded-lg dark:border-gray-700 space-y-4">
+          <h4 id="feederFormTitle" class="text-lg font-medium text-gray-800 dark:text-gray-200">Add New Feeder</h4>
+          <input type="hidden" id="feederEditId">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label for="feederName" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Feeder Name</label>
+              <input type="text" id="feederName" placeholder="e.g., Feeder 1" class="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700" required>
+            </div>
+            <div>
+              <label for="feederCode" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Feeder Code</label>
+              <input type="text" id="feederCode" placeholder="e.g., FD-1" class="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700">
+            </div>
+          </div>
+          <div class="flex justify-end space-x-2">
+            <button type="button" id="cancelFeederEditBtn" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition hidden">Cancel</button>
+            <button type="submit" id="saveFeederBtn" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition">Save Feeder</button>
+          </div>
+        </form>
+        <div>
+          <h4 class="text-lg font-medium text-gray-800 dark:text-gray-200 mb-2">Existing Feeders</h4>
+          <div id="feederListContainer" class="max-h-64 overflow-y-auto space-y-2 p-2 bg-gray-50 dark:bg-gray-900 rounded-md">
+            <p class="text-sm text-gray-500 p-4 text-center">Loading feeders...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="teamModal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden items-center justify-center z-[1003] p-4">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div class="flex justify-between items-center p-6 border-b dark:border-gray-700">
+        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Manage Dispatch Teams</h3>
+        <button id="closeTeamModalBtn" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><span class="material-icons">close</span></button>
+      </div>
+      <div class="p-6 overflow-y-auto space-y-6">
+        <form id="teamForm" class="p-4 border rounded-lg dark:border-gray-700 space-y-4">
+          <h4 id="teamFormTitle" class="text-lg font-medium text-gray-800 dark:text-gray-200">Add New Team</h4>
+          <input type="hidden" id="teamEditId">
+          <div>
+            <label for="teamName" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Team Name</label>
+            <input type="text" id="teamName" placeholder="e.g., Team Alpha" class="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md dark:bg-gray-700" required>
+          </div>
+          <div class="flex justify-end space-x-2">
+            <button type="button" id="cancelTeamEditBtn" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition hidden">Cancel</button>
+            <button type="submit" id="saveTeamBtn" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition">Save Team</button>
+          </div>
+        </form>
+        <div>
+          <h4 class="text-lg font-medium text-gray-800 dark:text-gray-200 mb-2">Existing Teams</h4>
+          <div id="teamListContainer" class="max-h-64 overflow-y-auto space-y-2 p-2 bg-gray-50 dark:bg-gray-900 rounded-md">
+            <p class="text-sm text-gray-500 p-4 text-center">Loading teams...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="scripts/supabase.js"></script>
+  <script src="scripts/shared.js"></script>
+  
+  <script src="scripts/settings.js" defer></script> 
+</body>
+</html>

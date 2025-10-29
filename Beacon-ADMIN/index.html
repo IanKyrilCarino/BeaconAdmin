@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BEACON Dashboard</title>
+
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            primary: "#007BFF",
+            "background-light": "#F8F9FA",
+            "background-dark": "#1A202C",
+          },
+          fontFamily: {
+            display: ["Inter", "sans-serif"],
+          },
+          borderRadius: {
+            DEFAULT: "0.5rem",
+          },
+        },
+      },
+    };
+  </script>
+
+  <script>
+    if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  </script>
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+
+<body class="bg-background-light dark:bg-background-dark font-display text-gray-800 dark:text-gray-200">
+  <div class="flex flex-col h-screen">
+
+    <div class="w-full bg-gray-900 text-white flex justify-between items-center px-6 py-4 shadow-md">
+      <a href="index.html" class="flex flex-col">
+        <h5 class="text-[4rem] font-bold leading-none">BEACON</h5>
+        <p class="text-xs text-gray-300">Reporting and Information Management System</p>
+      </a>
+
+      <div id="profileDropdownWrapper" class="relative">
+          <div id="profileTrigger" class="flex items-center space-x-3 cursor-pointer">
+              <img id="adminProfile" src="https://via.placeholder.com/40" alt="Admin Profile"
+                   class="w-10 h-10 rounded-full border-2 border-white object-cover" />
+              <span id="adminName" class="font-semibold text-white">ADMIN</span>
+          </div>
+
+          <div id="profileDropdown"
+               class="hidden absolute right-0 mt-3 w-48 bg-white dark:bg-gray-700 rounded-lg shadow-xl z-50 ring-1 ring-black ring-opacity-5">
+               <div class="py-1">
+                   <a href="#" id="openProfileModalBtn"
+                      class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600">
+                       Update Profile
+                   </a>
+                   
+                   <a href="login.html" id="logoutBtn"
+                      class="block px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-600">
+                       Logout
+                   </a>
+               </div>
+          </div>
+      </div>
+    </div>
+
+    <div class="flex flex-1 overflow-hidden">
+      
+      <aside class="w-64 bg-white dark:bg-gray-800 flex flex-col shadow-lg">
+        <nav class="flex-1 px-4 py-6 space-y-2">
+          
+          <a href="index.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg bg-primary text-white">
+            <span class="material-icons">dashboard</span>
+            <span class="ml-3">Dashboard</span>
+          </a>
+          <a href="reports.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+            <span class="material-icons">assessment</span>
+            <span class="ml-3">Reports</span>
+          </a>
+          <a href="outages.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+            <span class="material-icons">warning</span>
+            <span class="ml-3">Outages</span>
+          </a>
+          <a href="map.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+            <span class="material-icons">map</span>
+            <span class="ml-3">Map View</span>
+          </a>
+          <a href="notifications.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+            <span class="material-icons">notifications</span>
+            <span class="ml-3">Notifications</span>
+          </a>
+          <a href="settings.html" class="sidebar-link flex items-center px-4 py-2 rounded-lg">
+            <span class="material-icons">settings</span>
+            <span class="ml-3">Settings</span>
+          </a>
+        </nav>
+      </aside>
+
+      <div class="flex-1 flex flex-col">
+        <main class="flex-1 p-8 overflow-y-auto">
+
+          <div class="flex justify-between items-center mb-6">
+            <h2 class="text-3xl font-bold text-gray-800 dark:text-white">Dashboard Overview</h2>
+
+            <div class="relative">
+              <button id="dateDropdownBtn"
+                      class="flex items-center space-x-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition">
+                <span id="calendarIcon"></span>
+                <span id="selectedDate">Select Date</span>
+                <span id="arrowIcon"></span>
+              </button>
+
+              <div id="calendarDropdown"
+                   class="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 hidden z-50">
+                <input type="date" id="calendarInput"
+                       class="w-full p-2 border dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200" />
+                <button id="applyDateBtn"
+                        class="mt-3 w-full bg-blue-500 hover:bg-blue-600 text-white py-2 rounded-lg text-sm font-medium transition">
+                  Apply Filter
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div id="dashboardTiles" class="grid grid-cols-1 sm:grid-cols-3 gap-6 mt-6">
+            <div class="relative bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md hover:-translate-y-2 hover:scale-[1.03] hover:shadow-xl dark:hover:shadow-gray-900/50 cursor-pointer transition">
+              <div class="absolute top-0 left-0 w-full h-2 bg-red-500 rounded-t-xl"></div>
+              <div class="flex justify-between items-center mt-2">
+                <h3 class="text-gray-700 dark:text-gray-200 font-semibold text-lg">Total Reports</h3>
+                <div class="flex items-center space-x-1" id="trend-total">
+                  <span class="material-icons text-green-500 text-sm" id="icon-total">arrow_upward</span>
+                  <span class="text-green-600 text-sm font-medium" id="trendPercent-total">+0%</span>
+                </div>
+              </div>
+              <p class="text-3xl font-bold text-red-600 mt-4" id="value-total">0</p>
+              <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">Compared to yesterday</p>
+            </div>
+
+            <div class="relative bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md hover:-translate-y-2 hover:scale-[1.03] hover:shadow-xl dark:hover:shadow-gray-900/50 cursor-pointer transition">
+              <div class="absolute top-0 left-0 w-full h-2 bg-yellow-500 rounded-t-xl"></div>
+              <div class="flex justify-between items-center mt-2">
+                <h3 class="text-gray-700 dark:text-gray-200 font-semibold text-lg">Active Outages</h3>
+                <div class="flex items-center space-x-1" id="trend-active">
+                  <span class="material-icons text-green-500 text-sm" id="icon-active">arrow_upward</span>
+                  <span class="text-green-600 text-sm font-medium" id="trendPercent-active">+0%</span>
+                </div>
+              </div>
+              <p class="text-3xl font-bold text-yellow-500 mt-4" id="value-active">0</p>
+              <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">Compared to yesterday</p>
+            </div>
+
+            <div class="relative bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md hover:-translate-y-2 hover:scale-[1.03] hover:shadow-xl dark:hover:shadow-gray-900/50 cursor-pointer transition">
+              <div class="absolute top-0 left-0 w-full h-2 bg-green-500 rounded-t-xl"></div>
+              <div class="flex justify-between items-center mt-2">
+                <h3 class="text-gray-700 dark:text-gray-200 font-semibold text-lg">Completed Repairs</h3>
+                <div class="flex items-center space-x-1" id="trend-completed">
+                  <span class="material-icons text-green-500 text-sm" id="icon-completed">arrow_upward</span>
+                  <span class="text-green-600 text-sm font-medium" id="trendPercent-completed">+0%</span>
+                </div>
+              </div>
+              <p class="text-3xl font-bold text-green-600 mt-4" id="value-completed">0</p>
+              <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">Compared to yesterday</p>
+            </div>
+          </div>
+
+          <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mt-6 mb-6">
+            <h4 class="font-semibold text-lg mb-4 text-gray-700 dark:text-gray-300">Recent Outage Reports</h4>
+            <div class="overflow-x-auto">
+              <table id="reportsTable" class="w-full text-left">
+                <thead>
+                  <tr class="text-sm text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
+                    <th class="py-3 px-4 font-medium">Report ID</th>
+                    <th class="py-3 px-4 font-medium">Area</th>
+                    <th class="py-3 px-4 font-medium">Feeder</th>
+                    <th class="py-3 px-4 font-medium">Reported</th>
+                    <th class="py-3 px-4 font-medium">Status</th>
+                    <th class="py-3 px-4 font-medium">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="reportsBody" class="text-sm text-gray-600 dark:text-gray-300">
+                  <tr>
+                    <td colspan="6" class="py-6 text-center text-gray-400 dark:text-gray-500">
+                      No outage reports available.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="flex justify-center items-center mt-6 space-x-4">
+              <button id="prevPage" class="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm px-4 py-2 rounded disabled:opacity-50">Previous</button>
+              <span id="pageIndicator" class="text-gray-700 dark:text-gray-300 text-sm font-medium">Page 1 of 1</span>
+              <button id="nextPage" class="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm px-4 py-2 rounded disabled:opacity-50">Next</button>
+            </div>
+          </div>
+
+          <h3 class="text-xl font-semibold mb-4 text-gray-700 dark:text-gray-300 flex items-center">
+            Analytics
+            <span class="material-icons text-sm ml-1">expand_more</span>
+          </h3>
+
+          <div class="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-8">
+
+            <div class="lg:col-span-2 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md flex flex-col">
+              <div class="flex justify-between items-center mb-4">
+                <h4 class="font-semibold text-gray-700 dark:text-gray-300 text-lg">Outages Report per Feeder</h4>
+                <div class="relative">
+                  <button id="feederFilterBtn" class="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md text-sm flex items-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                    <span class="material-icons text-sm">filter_list</span>
+                    Filter
+                  </button>
+                  
+                  <div id="feederFilterPopup" class="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 hidden">
+                    <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                      <h5 class="font-semibold text-gray-800 dark:text-gray-200">Filter by Feeder</h5>
+                      <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Select feeders to display</p>
+                    </div>
+                    
+                    <div class="flex justify-between items-center p-3 border-b border-gray-200 dark:border-gray-700">
+                      <button id="feederSelectAll" class="text-blue-600 dark:text-blue-400 text-sm font-medium hover:text-blue-700 dark:hover:text-blue-300 transition-colors">
+                        Select All
+                      </button>
+                      <button id="feederClear" class="text-red-600 dark:text-red-400 text-sm font-medium hover:text-red-700 dark:hover:text-red-300 transition-colors">
+                        Clear All
+                      </button>
+                    </div>
+                    
+                    <div class="max-h-60 overflow-y-auto p-2">
+                      <div id="feederList" class="space-y-1"></div>
+                    </div>
+                    
+                    <div class="p-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-b-lg">
+                      <button id="feederApply" class="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded text-sm font-medium transition-colors">
+                        Apply Filters
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <canvas id="feederChartCanvas" class="w-full h-70"></canvas>
+              <p id="feederChartLabel" class="mt-auto text-sm text-gray-600 dark:text-gray-300">All feeders selected</p>
+            </div>
+
+            <div class="lg:col-span-3 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md flex flex-col">
+              <div class="flex justify-between items-center mb-4">
+                <h4 class="font-semibold text-gray-700 dark:text-gray-300 text-lg">Average Restoration Time (Hours)</h4>
+                <div class="relative">
+                  <button id="restorationFilterBtn" class="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md text-sm flex items-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                    <span class="material-icons text-sm">filter_list</span>
+                    Filter
+                  </button>
+                  
+                  <div id="restorationFilterPopup" class="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50 hidden">
+                    <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                      <h5 class="font-semibold text-gray-800 dark:text-gray-200">Filter by Feeder</h5>
+                      <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Select feeders to display</p>
+                    </div>
+                    
+                    <div class="flex justify-between items-center p-3 border-b border-gray-200 dark:border-gray-700">
+                      <button id="restorationSelectAll" class="text-blue-600 dark:text-blue-400 text-sm font-medium hover:text-blue-700 dark:hover:text-blue-300 transition-colors">
+                        Select All
+                      </button>
+                      <button id="restorationClear" class="text-red-600 dark:text-red-400 text-sm font-medium hover:text-red-700 dark:hover:text-red-300 transition-colors">
+                        Clear All
+                      </button>
+                    </div>
+                    
+                    <div class="max-h-60 overflow-y-auto p-2">
+                      <div id="restorationFeederList" class="space-y-1"></div>
+                    </div>
+                    
+                    <div class="p-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-b-lg">
+                      <button id="restorationApply" class="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded text-sm font-medium transition-colors">
+                        Apply Filters
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <canvas id="restorationChartCanvas" class="w-full h-70"></canvas>
+              <p id="restorationChartLabel" class="mt-auto text-sm text-gray-600 dark:text-gray-300">All feeders selected</p>
+            </div>
+
+          </div>
+          
+          <div id="barangayBreakdown" class="hidden bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mt-6">
+            <h4 class="font-semibold text-lg mb-4 text-gray-700 dark:text-gray-300">
+              Barangay Report Breakdown
+            </h4>
+
+            <div class="overflow-x-auto">
+              <table id="barangayTable" class="w-full text-left">
+                <thead>
+                  <tr class="text-sm text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
+                    <th class="py-3 px-4 font-medium">Barangay</th>
+                    <th class="py-3 px-4 font-medium">Total Reports</th>
+                  </tr>
+                </thead>
+                <tbody id="barangayBody" class="text-sm text-gray-600 dark:text-gray-300"></tbody>
+              </table>
+            </div>
+
+            <button id="backToDashboard"
+              class="mt-6 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-4 py-2 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition">
+              Back to Dashboard
+            </button>
+          </div>
+
+
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <template id="calendarIconTemplate">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+        d="M8 7V3m8 4V3m-9 8h10m-12 8h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+    </svg>
+  </template>
+
+  <template id="arrowDownTemplate">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+    </svg>
+  </template>
+
+  <div id="profileModal" class="fixed inset-0 bg-gray-900 bg-opacity-50 hidden items-center justify-center z-[100]">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-2xl w-full max-w-md p-6 relative">
+        <div class="flex justify-between items-center pb-3 border-b dark:border-gray-700">
+            <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Update Profile Settings</h3>
+            <button id="closeProfileModalBtn" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                     xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </button>
+        </div>
+
+        <form id="profileUpdateForm" class="mt-4 space-y-4">
+            <div>
+                <label for="profilePicture" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Profile Picture</label>
+                <input type="file" id="profilePictureInput"
+                       class="mt-1 block w-full text-sm text-gray-900 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer bg-gray-50 dark:bg-gray-700 focus:outline-none"
+                       accept="image/*">
+            </div>
+
+            <div>
+                <label for="nickname" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Nickname (Display Name)</label>
+                <input type="text" id="nicknameInput" value="ADMIN"
+                       class="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                       placeholder="Enter your nickname">
+            </div>
+
+            <div>
+                <label for="password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">New Password</label>
+                <input type="password" id="passwordInput"
+                       class="mt-1 block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                       placeholder="Leave blank to keep current password">
+            </div>
+
+            <div class="pt-4 flex justify-end space-x-3">
+                <button type="button" id="cancelUpdateBtn" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition">
+                    Cancel
+                </button>
+                <button type="submit" id="saveProfileBtn" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition">
+                    Save Changes
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <script src="scripts/supabase.js"></script>
+  <script src="scripts/shared.js"></script>
+  <script src="scripts/dashboard.js" defer></script>
+</body>
+</html>
