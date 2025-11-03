@@ -1,7 +1,3 @@
-// ==========================
-// LOGIN PAGE SCRIPT - Connect na lang sa DB
-// ==========================
-
 document.addEventListener("DOMContentLoaded", () => {
     const loginForm = document.getElementById('loginForm');
     const emailInput = document.getElementById('email');
@@ -10,17 +6,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const errorMessageDiv = document.getElementById('errorMessage');
 
     if (!window.supabase) {
-      console.error("Supabase client not initialized. Make sure supabase.js is loaded.");
-      errorMessageDiv.textContent = "A configuration error occurred.";
-      return;
+        console.error("Supabase client not initialized.");
+        errorMessageDiv.textContent = "Configuration error. Please check Supabase setup.";
+        return;
     }
 
     console.log("Login script initialized (Supabase Mode).");
 
     loginForm.addEventListener('submit', async (event) => {
-        event.preventDefault(); // Stop default form submission
+        event.preventDefault();
 
-        // Clear previous errors and disable button
         errorMessageDiv.textContent = '';
         loginButton.disabled = true;
         loginButton.textContent = 'Logging in...';
@@ -28,29 +23,49 @@ document.addEventListener("DOMContentLoaded", () => {
         const email = emailInput.value.trim();
         const password = passwordInput.value;
 
-        // Basic validation
         if (!email || !password) {
             errorMessageDiv.textContent = 'Please enter both email and password.';
             loginButton.disabled = false;
             loginButton.textContent = 'Login';
             return;
         }
-        
+
         try {
-            const { data, error } = await supabase.auth.signInWithPassword({
-                email: email,
-                password: password,
+            // Sign in with Supabase Auth
+            const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+                email,
+                password
             });
 
-            if (error) {
-                console.error("Login error:", error.message);
-                errorMessageDiv.textContent = error.message;
-            } else if (data.session) {
-                console.log("Login successful!");
-                window.location.href = 'index.html';
-            } else {
-                errorMessageDiv.textContent = 'Login failed. Please try again.';
+            if (authError) {
+                console.error("Auth error:", authError);
+                errorMessageDiv.textContent = authError.message;
+                return;
             }
+
+            if (!authData.session) {
+                errorMessageDiv.textContent = 'Email not verified. Please check your inbox.';
+                return;
+            }
+
+            const userId = authData.user.id;
+
+            // Fetch profile from profiles table
+            const { data: profile, error: profileError } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .single();
+
+            if (profileError) {
+                console.error("Profile fetch error:", profileError);
+                errorMessageDiv.textContent = 'Failed to fetch user profile.';
+                return;
+            }
+
+            console.log("Login successful! Profile:", profile);
+            localStorage.setItem('userProfile', JSON.stringify(profile));
+            window.location.href = 'index.html';
 
         } catch (err) {
             console.error("Unexpected login error:", err);
@@ -60,5 +75,4 @@ document.addEventListener("DOMContentLoaded", () => {
             loginButton.textContent = 'Login';
         }
     });
-
 });

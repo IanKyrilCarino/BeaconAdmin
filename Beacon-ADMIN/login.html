@@ -10,14 +10,13 @@
 
     <script>
       tailwind.config = {
-        darkMode: "class", // Keep dark mode support consistent
+        darkMode: "class",
         theme: {
           extend: {
             colors: {
-              primary: "#007BFF", // Your primary blue
+              primary: "#007BFF",
               "background-light": "#F8F9FA",
               "background-dark": "#1A202C",
-              // Add other custom colors if needed
             },
             fontFamily: {
               display: ["Inter", "sans-serif"],
@@ -39,11 +38,8 @@
     </script>
 
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
-
     <link rel="stylesheet" href="styles.css" />
-
 </head>
 <body class="bg-background-light dark:bg-background-dark font-display flex items-center justify-center min-h-screen p-4">
 
@@ -75,8 +71,7 @@
                            placeholder="••••••••">
                 </div>
 
-                <div id="errorMessage" class="text-sm text-red-600 dark:text-red-400 h-4">
-                    </div>
+                <div id="errorMessage" class="text-sm text-red-600 dark:text-red-400 h-4"></div>
 
                 <div>
                     <button type="submit" id="loginButton"
@@ -89,14 +84,16 @@
                     <a href="#" class="text-sm text-primary hover:underline dark:text-blue-400">
                         Forgot Password?
                     </a>
-                    </div>
+                </div>
             </form>
         </div>
     </div>
 
+    <!-- Supabase CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Supabase initialization -->
     <script src="scripts/supabase.js"></script>
-
+    <!-- Login logic -->
     <script src="scripts/login.js" defer></script>
 
 </body>
