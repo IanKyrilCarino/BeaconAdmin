@@ -81,6 +81,18 @@ document.addEventListener("DOMContentLoaded", () => {
     // Fetch all report data from Supabase first
     await fetchAllReports();
     
+    // DEBUG: Check image URLs
+    console.log('=== IMAGE DEBUG INFO ===');
+    allReports.forEach((report, index) => {
+      if (report.images && report.images.length > 0) {
+        console.log(`Report ${index}:`, {
+          id: report.id,
+          imageCount: report.images.length,
+          imageUrls: report.images
+        });
+      }
+    });
+    
     // Now that data is loaded, proceed with aggregation and UI setup
     loadAndAggregateFeederData();
     attachEventListeners();
@@ -104,17 +116,66 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     try {
-      // Assumes your table is named 'reports'
+      // 1. Fetch from 'reports' and join related tables
       const { data, error } = await supabase
         .from('reports')
-        .select('*');
+        .select(`
+          *,
+          feeder_id,
+          barangays ( name ),
+          report_images ( image_url )
+        `);
         
       if (error) {
         throw error;
       }
       
-      allReports = data || [];
-      console.log(`Fetched ${allReports.length} total reports.`);
+      // 2. Transform the raw DB data to match what your JS logic expects
+      allReports = (data || []).map(r => {
+        // Helper to capitalize status (e.g., "completed" -> "Completed")
+        const capitalize = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : 'Unknown';
+        
+        // Process status to match your STATUS_COLORS keys
+        let processedStatus = 'UNKNOWN';
+        if (r.status) {
+          processedStatus = r.status.toLowerCase() === 'pending' 
+            ? 'PENDING' // Fix for 'pending' vs 'PENDING'
+            : capitalize(r.status);
+        }
+
+        // FIXED: Better image URL handling
+        const images = (r.report_images || []).map(img => {
+          // If it's already a full URL, use it directly
+          if (img.image_url.startsWith('http')) {
+            return img.image_url;
+          }
+          // If it's a storage path, construct the public URL
+          const { data: publicUrlData } = supabase.storage
+            .from('report_images')
+            .getPublicUrl(img.image_url);
+          return publicUrlData.publicUrl;
+        });
+
+        return {
+          ...r,
+          // CONFLICT FIX 1: Your code expects `feeder` (number)
+          feeder: r.feeder_id,
+          
+          // CONFLICT FIX 2: Your code expects `barangay` (string name)
+          barangay: r.barangays ? r.barangays.name : 'Unknown Barangay',
+          
+          // CONFLICT FIX 3: Your code expects `status` (uppercase 'PENDING')
+          status: processedStatus,
+
+          // CONFLICT FIX 4: Your code expects `volume` (number) for aggregation
+          volume: 1, // Set to 1 as a counter
+          
+          // CONFLICT FIX 5: Your code expects `images` (array of strings)
+          images: images // This now contains full URLs
+        };
+      });
+
+      console.log(`Fetched and transformed ${allReports.length} total reports.`);
 
     } catch (error) {
       console.error("Error fetching reports:", error.message);
@@ -122,11 +183,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+
   /**
    * Helper function to get ONLY the "PENDING" items from the live data.
    * Made globally available for unified modal system
    */
   function getPendingItems() {
+    // This function is UNCHANGED and now works because fetchAllReports()
+    // correctly transforms 'pending' to 'PENDING'.
     return allReports.filter(r => r.status === 'PENDING');
   }
 
@@ -183,8 +247,7 @@ document.addEventListener("DOMContentLoaded", () => {
           group.coordinates = `${report.latitude.toFixed(4)}, ${report.longitude.toFixed(4)}`;
         }
       });
-
-    return Object.values(barangayGroups).map(group => {
+      return Object.values(barangayGroups).map(group => {
       let commonCause = "N/A";
       let maxCount = 0;
       Object.entries(group.causes).forEach(([cause, count]) => {
@@ -294,8 +357,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Make refreshCurrentView globally available for the unified modal system
   window.refreshCurrentView = refreshCurrentView;
-
-  // ===================================
+    // ===================================
   // UI & TABLE RENDERING
   // ===================================
 
@@ -484,78 +546,81 @@ document.addEventListener("DOMContentLoaded", () => {
   // FILTERING & PAGINATION
   // ===================================
 
-  function applyFiltersAndRender() {
+  function applyFiltersAndRender(keepPage = false) {
     const sort = sortFilterEl.value;
     const search = searchInputEl.value.toLowerCase();
 
-    // currentDisplayData is already pre-filtered to PENDING
     let filteredData = [...currentDisplayData];
 
-    // 1. Filter by Search
+    // --- Filter by search ---
     if (search) {
-      filteredData = filteredData.filter(item => {
-        if (currentView === 'barangays') {
-          return item.barangay.toLowerCase().includes(search) || item.commonCause.toLowerCase().includes(search) || (item.coordinates && item.coordinates.toLowerCase().includes(search));
-        }
-        if (currentView === 'individuals') {
-          return item.description.toLowerCase().includes(search) || String(item.id).includes(search) || (item.latitude && item.longitude && `${item.latitude},${item.longitude}`.includes(search));
-        }
-        return false;
-      });
+        filteredData = filteredData.filter(item => {
+            if (currentView === 'barangays') {
+                return item.barangay.toLowerCase().includes(search) ||
+                       item.commonCause.toLowerCase().includes(search) ||
+                       (item.coordinates && item.coordinates.toLowerCase().includes(search));
+            }
+            if (currentView === 'individuals') {
+                return item.description.toLowerCase().includes(search) ||
+                       String(item.id).includes(search) ||
+                       (item.latitude && item.longitude &&
+                        `${item.latitude},${item.longitude}`.includes(search));
+            }
+            return false;
+        });
     }
 
-    // 2. Sort
+    // --- Sort ---
     switch (sort) {
-      case 'id':
-        filteredData.sort((a, b) => (a.id > b.id ? 1 : -1));
-        break;
-      case 'volume-high':
-        filteredData.sort((a, b) => (currentView === 'barangays' ? b.reportCount - a.reportCount : b.id - a.id));
-        break;
-      case 'volume-low':
-        filteredData.sort((a, b) => (currentView === 'barangays' ? a.reportCount - b.reportCount : a.id - b.id));
-        break;
-      case 'with-pictures':
-        if (currentView === 'individuals') {
-          filteredData.sort((a, b) => (b.images?.length || 0) - (a.images?.length || 0));
-        }
-        break;
-      case 'with-coordinates':
-        if (currentView === 'individuals') {
-          filteredData.sort((a, b) => (a.latitude && b.latitude ? 0 : a.latitude ? -1 : 1));
-        } else if (currentView === 'barangays') {
-          filteredData.sort((a, b) => (a.coordinates && b.coordinates ? 0 : a.coordinates ? -1 : 1));
-        }
-        break;
+        case 'id':
+            filteredData.sort((a, b) => a.id > b.id ? 1 : -1);
+            break;
+        case 'volume-high':
+            filteredData.sort((a, b) => currentView === 'barangays' ? b.reportCount - a.reportCount : b.id - a.id);
+            break;
+        case 'volume-low':
+            filteredData.sort((a, b) => currentView === 'barangays' ? a.reportCount - b.reportCount : a.id - b.id);
+            break;
+        case 'with-pictures':
+            if (currentView === 'individuals') {
+                filteredData.sort((a, b) => (b.images?.length || 0) - (a.images?.length || 0));
+            }
+            break;
+        case 'with-coordinates':
+            filteredData.sort((a, b) => {
+                const aHas = a.coordinates || (a.latitude && a.longitude);
+                const bHas = b.coordinates || (b.latitude && b.longitude);
+                return aHas && !bHas ? -1 : !aHas && bHas ? 1 : 0;
+            });
+            break;
     }
 
-    // 3. Render
-    currentPage = 1; // Reset to first page after every filter
+    if (!keepPage) currentPage = 1;
+
     renderTable(filteredData);
     updatePaginationUI(filteredData);
-  }
-
-  function updatePaginationUI(data) {
-    const totalItems = data.length;
-    const totalPages = Math.ceil(totalItems / itemsPerPage);
-    const startIndex = (currentPage - 1) * itemsPerPage + 1;
-    const endIndex = Math.min(currentPage * itemsPerPage, totalItems);
-    showingCountEl.textContent = totalItems > 0 ? `${startIndex}-${endIndex}` : '0';
-    totalCountEl.textContent = totalItems;
-    prevPageBtn.disabled = currentPage === 1;
-    nextPageBtn.disabled = currentPage === totalPages || totalPages === 0;
   }
 
   function changePage(direction) {
     const totalItems = getFilteredData().length;
     const totalPages = Math.ceil(totalItems / itemsPerPage);
-    if (direction === 'next' && currentPage < totalPages) {
-      currentPage++;
-    } else if (direction === 'prev' && currentPage > 1) {
-      currentPage--;
-    }
-    applyFiltersAndRender();
+
+    if (direction === 'next' && currentPage < totalPages) currentPage++;
+    else if (direction === 'prev' && currentPage > 1) currentPage--;
+
+    applyFiltersAndRender(true); // Keep current page
     resetSelections();
+  }
+
+  function updatePaginationUI(data) {
+    const totalItems = data.length;
+    const totalPages = Math.ceil(totalItems / itemsPerPage);
+    
+    showingCountEl.textContent = Math.min(itemsPerPage, data.length);
+    totalCountEl.textContent = totalItems;
+    
+    prevPageBtn.disabled = currentPage <= 1;
+    nextPageBtn.disabled = currentPage >= totalPages;
   }
 
   function getFilteredData() {
@@ -584,7 +649,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const checkboxes = reportsBody.querySelectorAll('.report-checkbox');
 
     checkboxes.forEach(cb => {
-      const id = (currentView === 'barangays') ? cb.dataset.id : parseInt(cb.dataset.id);
+      // --- FIX: Check view before parseInt ---
+      const id = (currentView === 'barangays') ? cb.dataset.id : cb.dataset.id; // Always treat id as string from dataset
       if (isChecked) {
         selectedItems.add(id);
       } else {
@@ -596,7 +662,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function handleCheckboxChange(e) {
     const checkbox = e.target;
-    const id = (currentView === 'barangays') ? checkbox.dataset.id : parseInt(checkbox.dataset.id);
+    // --- FIX: Check view before parseInt ---
+    const id = (currentView === 'barangays') ? checkbox.dataset.id : checkbox.dataset.id; // Always treat id as string from dataset
 
     if (checkbox.checked) {
       selectedItems.add(id);
@@ -608,7 +675,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function updateSelectedUI() {
     reportsBody.querySelectorAll('.report-checkbox').forEach(cb => {
-      const id = (currentView === 'barangays') ? cb.dataset.id : parseInt(cb.dataset.id);
+      // --- FIX: Check view before parseInt ---
+      const id = (currentView === 'barangays') ? cb.dataset.id : cb.dataset.id; // Always treat id as string from dataset
       cb.checked = selectedItems.has(id);
     });
 
@@ -624,17 +692,39 @@ document.addEventListener("DOMContentLoaded", () => {
     bulkUpdateBtn.classList.toggle('hidden', selectedItems.size === 0);
     bulkUpdateBtn.textContent = `Update Selected (${selectedItems.size})`;
   }
-
-  // ===================================
+    // ===================================
   // MODAL INTEGRATION WITH UNIFIED SYSTEM
   // ===================================
 
   function hasCoords(report) { return report && report.latitude && report.longitude; }
 
   function showIndividualDetails(reportId) {
-    const report = allReports.find(r => r.id === reportId); // Find from live data
-    if (!report) return;
+    const report = allReports.find(r => r.id === reportId);
+    if (!report) {
+      console.error("Could not find report with ID:", reportId);
+      return;
+    }
+    
     const coordsText = hasCoords(report) ? `${report.latitude.toFixed(4)}, ${report.longitude.toFixed(4)}` : '';
+    
+    // FIXED: Better image display with error handling
+    let imagesHTML = '';
+    if (report.images && report.images.length > 0) {
+      imagesHTML = `
+        <div class="grid grid-cols-3 gap-2 mt-2">
+          ${report.images.map((img, index) => `
+            <img src="${img}" 
+                 alt="Report image ${index + 1}" 
+                 class="w-full h-24 object-cover rounded cursor-pointer hover:opacity-75 view-popup-image"
+                 onerror="this.style.display='none'"
+                 data-index="${index}">
+          `).join('')}
+        </div>
+      `;
+    } else {
+      imagesHTML = '<p class="text-gray-500 dark:text-gray-400 mt-1">No images submitted</p>';
+    }
+
     const modal = document.createElement('div');
     modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
     modal.innerHTML = `
@@ -651,7 +741,12 @@ document.addEventListener("DOMContentLoaded", () => {
             <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Cause</label><p class="text-lg text-gray-900 dark:text-white">${report.cause || 'Undetermined'}</p></div>
           </div>
           <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label><p class="text-gray-900 dark:text-white mt-1">${report.description || 'No description provided'}</p></div>
-          <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Images</label>${(report.images && report.images.length > 0) ? `<div class="grid grid-cols-3 gap-2 mt-2">${report.images.map(img => `<img src="${img}" alt="Report image" class="w-full h-24 object-cover rounded cursor-pointer hover:opacity-75 view-popup-image">`).join('')}</div>` : '<p class="text-gray-500 dark:text-gray-400 mt-1">No images submitted</p>'}</div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Images (${report.images ? report.images.length : 0})
+            </label>
+            ${imagesHTML}
+          </div>
           <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Coordinates</label>${hasCoords(report) ? `<div class="flex items-center space-x-2 mt-1"><span class="text-gray-900 dark:text-white">${coordsText}</span><button type="button" class="text-blue-600 dark:text-blue-400 hover:underline copy-coords-btn" data-coords="${coordsText}"><span class="material-icons text-sm">content_copy</span></button></div>` : '<p class="text-gray-500 dark:text-gray-400 mt-1">No coordinates submitted</p>'}</div>
           <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Reported At</label><p class="text-gray-900 dark:text-white">${new Date(report.created_at).toLocaleString()}</p></div>
         </div>
@@ -661,15 +756,15 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
       </div>
     `;
+    
     document.body.appendChild(modal);
 
     modal.querySelectorAll('.close-modal').forEach(btn => btn.addEventListener('click', () => modal.remove()));
     modal.querySelector('.update-from-details').addEventListener('click', function() {
-      const reportId = parseInt(this.dataset.id); 
+      const reportId = this.dataset.id; 
       selectedItems.clear(); 
       selectedItems.add(reportId); 
       modal.remove(); 
-      // Use unified modal system
       window.showUpdateModal([reportId], 'reports', {
         currentView: currentView,
         currentFeederId: currentFeederId,
@@ -677,14 +772,85 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
     modal.querySelectorAll('.copy-coords-btn').forEach(btn => btn.addEventListener('click', handleCopyCoords));
-    modal.querySelectorAll('.view-popup-image').forEach(img => img.addEventListener('click', () => showImageModal(img.src)));
+    
+    // FIXED: Only add click listeners to images that actually loaded
+    modal.querySelectorAll('.view-popup-image').forEach((img, idx) => {
+      img.addEventListener('click', () => {
+        // Filter out images that failed to load
+        const validImages = report.images.filter((_, index) => {
+          const imgElement = modal.querySelector(`[data-index="${index}"]`);
+          return imgElement && imgElement.naturalWidth > 0;
+        });
+        if (validImages.length > 0) {
+          showImageModal(validImages, idx);
+        }
+      });
+    });
   }
 
-  function showImageModal(imageUrl) {
+  function showImageModal(images, startIndex = 0) {
+    if (!Array.isArray(images) || images.length === 0) return;
+
+    let currentIndex = startIndex;
+
     const modal = document.createElement('div');
     modal.className = 'fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4';
-    modal.addEventListener('click', () => modal.remove());
-    modal.innerHTML = `<div class="relative max-w-3xl max-h-[90vh]"><button type="button" class="absolute -top-10 right-0 text-white text-3xl font-bold">&times;</button><img src="${imageUrl}" class="w-full h-auto object-contain max-h-[90vh] rounded-lg"></div>`;
+
+    function renderImage() {
+      modal.innerHTML = `
+        <div class="relative max-w-3xl max-h-[90vh] flex items-center justify-center">
+          <button type="button" class="absolute left-2 text-white text-3xl font-bold z-10 bg-black bg-opacity-50 rounded-full w-10 h-10 flex items-center justify-center" ${currentIndex === 0 ? 'disabled style="opacity:0.5"' : ''}>&#10094;</button>
+          <img src="${images[currentIndex]}" class="w-full h-auto object-contain max-h-[90vh] rounded-lg">
+          <button type="button" class="absolute right-2 text-white text-3xl font-bold z-10 bg-black bg-opacity-50 rounded-full w-10 h-10 flex items-center justify-center" ${currentIndex === images.length - 1 ? 'disabled style="opacity:0.5"' : ''}>&#10095;</button>
+          <button type="button" class="absolute top-2 right-2 text-white text-3xl font-bold bg-black bg-opacity-50 rounded-full w-10 h-10 flex items-center justify-center">&times;</button>
+          <div class="absolute bottom-4 left-1/2 transform -translate-x-1/2 text-white bg-black bg-opacity-50 px-3 py-1 rounded-full text-sm">
+            ${currentIndex + 1} / ${images.length}
+          </div>
+        </div>
+      `;
+
+      const [prevBtn, nextBtn, closeBtn] = modal.querySelectorAll('button');
+
+      prevBtn.addEventListener('click', (e) => { 
+        e.stopPropagation(); 
+        if (currentIndex > 0) {
+          currentIndex--;
+          renderImage(); 
+        }
+      });
+      
+      nextBtn.addEventListener('click', (e) => { 
+        e.stopPropagation(); 
+        if (currentIndex < images.length - 1) {
+          currentIndex++;
+          renderImage(); 
+        }
+      });
+      
+      closeBtn.addEventListener('click', () => modal.remove());
+    }
+
+    renderImage();
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.remove(); // click outside to close
+    });
+
+    // Add keyboard navigation
+    const handleKeydown = (e) => {
+      if (e.key === 'Escape') modal.remove();
+      if (e.key === 'ArrowLeft' && currentIndex > 0) {
+        currentIndex--;
+        renderImage();
+      }
+      if (e.key === 'ArrowRight' && currentIndex < images.length - 1) {
+        currentIndex++;
+        renderImage();
+      }
+    };
+    
+    document.addEventListener('keydown', handleKeydown);
+    modal._cleanup = () => document.removeEventListener('keydown', handleKeydown);
+
     document.body.appendChild(modal);
   }
 
@@ -717,10 +883,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // Event delegation for table buttons
     reportsBody.addEventListener('click', (e) => {
       const target = e.target;
-      const id = target.dataset.id; // Could be barangay name or report ID
       const btn = target.closest('button'); 
-
       if (!btn) return;
+
+      const id = btn.dataset.id; // Get id from the button
 
       if (btn.classList.contains('copy-coords-btn')) {
           handleCopyCoords(e);
@@ -742,17 +908,23 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (currentView === 'individuals') {
         if (btn.classList.contains('update-item-btn')) {
           selectedItems.clear(); 
-          selectedItems.add(parseInt(id)); 
-          window.showUpdateModal([parseInt(id)], 'reports', {
+          selectedItems.add(id); 
+          window.showUpdateModal([id], 'reports', {
             currentView: currentView,
             currentFeederId: currentFeederId,
             currentBarangay: currentBarangay
           });
         } else if (btn.classList.contains('view-details-btn')) {
-          showIndividualDetails(parseInt(id));
+          showIndividualDetails(id);
         } else if (btn.classList.contains('view-images-btn')) {
-          const images = JSON.parse(btn.dataset.images);
-          if (images.length > 0) showImageModal(images[0]);
+          try {
+            const images = JSON.parse(btn.dataset.images);
+            if (images && images.length > 0) {
+              showImageModal(images, 0);
+            }
+          } catch (error) {
+            console.error('Error parsing images:', error);
+          }
         }
       }
     });
@@ -766,6 +938,24 @@ document.addEventListener("DOMContentLoaded", () => {
 
     prevPageBtn.addEventListener('click', () => changePage('prev'));
     nextPageBtn.addEventListener('click', () => changePage('next'));
+
+    // Add keyboard shortcuts
+    document.addEventListener('keydown', (e) => {
+      // Refresh with F5
+      if (e.key === 'F5') {
+        e.preventDefault();
+        refreshCurrentView();
+      }
+      
+      // Escape key to go back
+      if (e.key === 'Escape') {
+        if (currentView === 'individuals') {
+          showBarangayView(currentFeederId);
+        } else if (currentView === 'barangays') {
+          showFeederTilesView();
+        }
+      }
+    });
   }
 
   // --- Start ---

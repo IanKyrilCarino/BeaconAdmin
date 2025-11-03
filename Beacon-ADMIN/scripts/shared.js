@@ -1,6 +1,6 @@
 // ==========================
-// SHARED SCRIPT (v5 - Unified Modal System)
-// (Contains universal utilities, UI logic, and unified modals)
+// SHARED SCRIPT (v6 - Merged)
+// (Contains universal utilities, UI logic, unified modals, and all page/filter event listeners)
 // ==========================
 // Loaded SECOND on every page
 
@@ -11,28 +11,57 @@
  * @param {string} message The message to display.
  */
 window.showSuccessPopup = function(message) {
-  const popup = document.createElement('div');
-  popup.className = 'fixed top-4 right-4 bg-green-500 text-white px-6 py-4 rounded-lg shadow-lg z-[9999] transform transition-transform duration-300 translate-x-0';
-  popup.innerHTML = `
-    <div class="flex items-center space-x-3">
-      <span class="material-icons text-white">check_circle</span>
-      <span class="font-medium">${message}</span>
-      <button class="text-white hover:text-green-100 close-popup ml-2">
-        <span class="material-icons text-sm">close</span>
-      </button>
-    </div>
-  `;
-  document.body.appendChild(popup);
-  setTimeout(() => {
-    if (popup.parentNode) {
-      popup.style.transform = 'translateX(100%)';
-      setTimeout(() => popup.remove(), 300);
-    }
-  }, 4000);
-  popup.querySelector('.close-popup').addEventListener('click', () => {
+const popup = document.createElement('div');
+popup.className = 'fixed top-4 right-4 bg-green-500 text-white px-6 py-4 rounded-lg shadow-lg z-[9999] transform transition-transform duration-300 translate-x-0';
+popup.innerHTML = `
+  <div class="flex items-center space-x-3">
+    <span class="material-icons text-white">check_circle</span>
+    <span class="font-medium">${message}</span>
+    <button class="text-white hover:text-green-100 close-popup ml-2">
+      <span class="material-icons text-sm">close</span>
+    </button>
+  </div>
+`;
+document.body.appendChild(popup);
+setTimeout(() => {
+  if (popup.parentNode) {
     popup.style.transform = 'translateX(100%)';
     setTimeout(() => popup.remove(), 300);
-  });
+  }
+}, 4000);
+popup.querySelector('.close-popup').addEventListener('click', () => {
+  popup.style.transform = 'translateX(100%)';
+  setTimeout(() => popup.remove(), 300);
+});
+}
+
+/**
+ * Shows a temporary error popup.
+ * @param {string} message The error message to display.
+ */
+window.showErrorPopup = function(message) {
+const popup = document.createElement('div');
+popup.className = 'fixed top-4 right-4 bg-red-500 text-white px-6 py-4 rounded-lg shadow-lg z-[9999] transform transition-transform duration-300 translate-x-0';
+popup.innerHTML = `
+  <div class="flex items-center space-x-3">
+    <span class="material-icons text-white">error</span>
+    <span class="font-medium">${message}</span>
+    <button class="text-white hover:text-red-100 close-popup ml-2">
+      <span class="material-icons text-sm">close</span>
+    </button>
+  </div>
+`;
+document.body.appendChild(popup);
+setTimeout(() => {
+  if (popup.parentNode) {
+    popup.style.transform = 'translateX(100%)';
+    setTimeout(() => popup.remove(), 300);
+  }
+}, 4000);
+popup.querySelector('.close-popup').addEventListener('click', () => {
+  popup.style.transform = 'translateX(100%)';
+  setTimeout(() => popup.remove(), 300);
+});
 }
 
 /**
@@ -41,22 +70,22 @@ window.showSuccessPopup = function(message) {
  * @param {string} popupId The ID of the popup/dropdown element.
  */
 window.setupDropdownToggle = function(buttonId, popupId) {
-  const button = document.getElementById(buttonId);
-  const popup = document.getElementById(popupId);
-  if (!button || !popup) return;
-  button.addEventListener("click", (e) => {
-    e.stopPropagation();
-    popup.classList.toggle("hidden");
-  });
-  document.addEventListener("click", (e) => {
-    if (!popup.contains(e.target) && !button.contains(e.target)) {
-      popup.classList.add("hidden");
-    }
-  });
+const button = document.getElementById(buttonId);
+const popup = document.getElementById(popupId);
+if (!button || !popup) return;
+button.addEventListener("click", (e) => {
+  e.stopPropagation();
+  popup.classList.toggle("hidden");
+});
+document.addEventListener("click", (e) => {
+  if (!popup.contains(e.target) && !button.contains(e.target)) {
+    popup.classList.add("hidden");
+  }
+});
 };
 
 // ==========================
-// UNIFIED MODAL SYSTEM FOR REPORTS & OUTAGES
+// UNIFIED MODAL SYSTEM FOR REPORTS & OUTAGES (v6)
 // ==========================
 
 /**
@@ -65,71 +94,212 @@ window.setupDropdownToggle = function(buttonId, popupId) {
  * @param {string} context - 'reports' or 'outages'
  * @param {Object} options - Additional options like currentFeederId, currentBarangay
  */
-window.showUpdateModal = function(itemIds, context, options = {}) {
-  if (!Array.isArray(itemIds) || itemIds.length === 0) return;
-  
-  const isBulk = itemIds.length > 1;
-  const dispatchTeams = [
-    { id: 'alpha', name: 'Team Alpha' },
-    { id: 'beta', name: 'Team Beta' },
-    { id: 'gamma', name: 'Team Gamma' }
-  ];
+window.showUpdateModal = async function(itemIds, context, options = {}) {
+if (!Array.isArray(itemIds) || itemIds.length === 0) {
+  console.error('No item IDs provided to showUpdateModal');
+  return;
+}
 
-  // Get data based on context
+const isBulk = itemIds.length > 1;
+const dispatchTeams = [
+  { id: 'alpha', name: 'Team Alpha' },
+  { id: 'beta', name: 'Team Beta' },
+  { id: 'gamma', name: 'Team Gamma' }
+];
+
+try {
+  // Get data based on context with proper fallbacks
   let itemsData = [];
   let allAssociatedIds = [];
+  let feederId = options.currentFeederId || null;
+  let selectedBarangays = new Set();
   
+  console.log(`showUpdateModal called with context: ${context}, itemIds:`, itemIds, 'options:', options);
+
   if (context === 'reports') {
     // For reports, we need to get pending items
     const pendingItems = window.getPendingItems ? window.getPendingItems() : [];
+    console.log('Pending items found:', pendingItems.length);
     
     if (options.currentView === 'barangays') {
+      // Barangay view - itemIds are barangay names
       itemsData = itemIds.map(barangayName => ({ barangay: barangayName }));
-      allAssociatedIds = pendingItems
-        .filter(r => r.feeder === options.currentFeederId && itemIds.includes(r.barangay))
-        .map(r => r.id);
+      selectedBarangays = new Set(itemIds);
+      
+      // Get all reports for these barangays to determine feeder
+      const barangayReports = pendingItems.filter(r => itemIds.includes(r.barangay));
+      console.log('Barangay reports found:', barangayReports.length);
+      
+      if (barangayReports.length > 0 && !feederId) {
+        feederId = barangayReports[0].feeder;
+        console.log('Feeder ID determined from barangay reports:', feederId);
+      }
+      
+      allAssociatedIds = barangayReports.map(r => r.id);
     } else {
+      // Individual reports view
       itemsData = pendingItems.filter(r => itemIds.includes(r.id));
+      console.log('Individual reports data:', itemsData);
+      
       allAssociatedIds = itemIds;
+      
+      // Get selected barangays and feeder from reports
+      itemsData.forEach(item => {
+        if (item.barangay) selectedBarangays.add(item.barangay);
+        if (!feederId && item.feeder) {
+          feederId = item.feeder;
+        }
+      });
     }
   } else if (context === 'outages') {
     // For outages, get from mockOutages or global data
     const outagesData = window.mockOutages || [];
+    console.log('Outages data available:', outagesData.length);
+    
     itemsData = outagesData.filter(o => itemIds.includes(o.id));
+    console.log('Filtered outages data:', itemsData);
+    
     allAssociatedIds = itemIds;
+    
+    // Get selected barangays from outages
+    itemsData.forEach(item => {
+      if (item.affected_areas && Array.isArray(item.affected_areas)) {
+        item.affected_areas.forEach(area => selectedBarangays.add(area));
+      } else if (item.barangay) {
+        selectedBarangays.add(item.barangay);
+      }
+    });
+  }
+
+  // If no items found, show error and return
+  if (itemsData.length === 0 && allAssociatedIds.length === 0) {
+    console.warn('No data found for the provided IDs');
+    window.showErrorPopup('No data found for the selected items');
+    return;
   }
 
   const initialData = itemsData[0] || {};
-  
-  // Generate area buttons based on context
+  console.log('Initial data for modal:', initialData);
+  console.log('Selected barangays:', Array.from(selectedBarangays));
+  console.log('Feeder ID:', feederId);
+
+  // DYNAMICALLY FETCH BARANGAYS FROM FEEDER_BARANGAYS TABLE
+  let allBarangaysInFeeder = [];
+  let feederBarangaysError = null;
+
+  if (feederId && window.supabase) {
+    try {
+      console.log(`Fetching barangays for feeder ${feederId}...`);
+      
+      const { data: feederBarangays, error } = await supabase
+        .from('feeder_barangays')
+        .select(`
+          barangay_id,
+          barangays (
+            id,
+            name
+          )
+        `)
+        .eq('feeder_id', parseInt(feederId));
+
+      if (error) {
+        feederBarangaysError = error;
+        console.error('Error fetching feeder barangays:', error);
+      } else {
+        console.log(`Found ${feederBarangays?.length || 0} barangay relationships for feeder ${feederId}`);
+        
+        if (feederBarangays && feederBarangays.length > 0) {
+          allBarangaysInFeeder = feederBarangays
+            .map(fb => {
+              if (!fb.barangays) {
+                console.warn('Missing barangay data for barangay_id:', fb.barangay_id);
+                return null;
+              }
+              return fb.barangays.name;
+            })
+            .filter(Boolean)
+            .sort();
+          
+          console.log(`Processed ${allBarangaysInFeeder.length} barangay names:`, allBarangaysInFeeder);
+        } else {
+          console.warn(`No barangays found in feeder_barangays for feeder ${feederId}`);
+        }
+      }
+    } catch (error) {
+      feederBarangaysError = error;
+      console.error('Exception fetching feeder barangays:', error);
+    }
+  }
+
+  // If no barangays found from feeder_barangays, try alternative approaches
+  if (allBarangaysInFeeder.length === 0) {
+    console.log('Trying fallback methods to get barangays...');
+
+    // Method 1: Use selected barangays from the data
+    if (selectedBarangays.size > 0) {
+      allBarangaysInFeeder = Array.from(selectedBarangays).sort();
+      console.log(`Using selected barangays as fallback:`, allBarangaysInFeeder);
+    }
+    // Method 2: Get from reports data for this feeder
+    else if (context === 'reports' && feederId) {
+      const reportsInFeeder = (window.mockAllReports || []).filter(r => r.feeder === feederId);
+      allBarangaysInFeeder = [...new Set(reportsInFeeder.map(r => r.barangay).filter(Boolean))].sort();
+      console.log(`Found ${allBarangaysInFeeder.length} barangays from reports data:`, allBarangaysInFeeder);
+    }
+    // Method 3: Get from barangays table directly
+    else if (window.supabase) {
+      try {
+        const { data: allBarangays, error } = await supabase
+          .from('barangays')
+          .select('id, name')
+          .order('name');
+        
+        if (!error && allBarangays) {
+          allBarangaysInFeeder = allBarangays.map(b => b.name).sort();
+          console.log(`Showing all barangays as fallback:`, allBarangaysInFeeder);
+        }
+      } catch (error) {
+        console.error('Error fetching all barangays:', error);
+      }
+    }
+  }
+
+  // Final fallback - if still no barangays, create a default list
+  if (allBarangaysInFeeder.length === 0) {
+    console.warn('No barangays found through any method, using default list');
+    allBarangaysInFeeder = ['Barangay 1', 'Barangay 2', 'Barangay 3']; // Default fallback
+    if (feederBarangaysError) {
+      console.error('Original feeder_barangays error:', feederBarangaysError);
+    }
+  }
+
+  // Generate area buttons with better error handling
   let areaButtonsHTML = '';
-  if (context === 'reports' && options.currentFeederId) {
-    const barangaysInFeeder = [...new Set((window.mockAllReports || [])
-      .filter(r => r.feeder === options.currentFeederId)
-      .map(r => r.barangay)
-    )];
-    const preSelectedBarangays = [...new Set(itemsData.map(item => item.barangay))];
-    
-    areaButtonsHTML = barangaysInFeeder.map(b => {
-      const isSelected = preSelectedBarangays.includes(b);
+  let areaInfoHTML = '';
+
+  if (allBarangaysInFeeder.length > 0) {
+    areaInfoHTML = `Feeder ${feederId || 'N/A'} - ${allBarangaysInFeeder.length} barangays`;
+    areaButtonsHTML = allBarangaysInFeeder.map(barangay => {
+      const isSelected = selectedBarangays.has(barangay);
       return `<button type="button" class="area-toggle-btn px-3 py-1.5 rounded-full text-sm font-medium transition ${
         isSelected
           ? 'bg-blue-600 text-white hover:bg-blue-700'
           : 'bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
-      }" data-barangay="${b}">${b}</button>`;
+      }" data-barangay="${barangay}">${barangay}</button>`;
     }).join('');
-  } else if (context === 'outages') {
-    const allBarangays = [...new Set((window.mockOutages || []).flatMap(o => o.affected_areas || []).filter(Boolean))];
-    const preSelectedBarangays = initialData.affected_areas || [];
-    
-    areaButtonsHTML = allBarangays.map(b => {
-      const isSelected = preSelectedBarangays.includes(b);
-      return `<button type="button" class="area-toggle-btn px-3 py-1.5 rounded-full text-sm font-medium transition ${
-        isSelected
-          ? 'bg-blue-600 text-white hover:bg-blue-700'
-          : 'bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
-      }" data-barangay="${b}">${b}</button>`;
-    }).join('');
+  } else {
+    areaInfoHTML = 'No barangays configured';
+    areaButtonsHTML = `
+      <div class="text-center p-4">
+        <p class="text-red-500 text-sm mb-2">No barangays found for this feeder</p>
+        <p class="text-gray-500 text-xs">
+          Please check that:<br>
+          1. The feeder_barangays table has data<br>
+          2. Feeder ${feederId} exists in the table<br>
+          3. Barangays are properly linked to feeders
+        </p>
+      </div>
+    `;
   }
 
   // Create modal HTML
@@ -149,17 +319,28 @@ window.showUpdateModal = function(itemIds, context, options = {}) {
       </div>
 
       <form id="updateForm" class="p-6 space-y-4 overflow-y-auto">
+        <!-- Feeder Info Display -->
+        ${feederId ? `
+          <div class="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+            <label class="block text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">Feeder Group</label>
+            <p class="text-lg font-semibold text-blue-600 dark:text-blue-400">Feeder ${feederId}</p>
+            <p class="text-xs text-blue-600 dark:text-blue-300 mt-1">
+              ${allBarangaysInFeeder.length} barangays in this feeder group
+            </p>
+          </div>
+        ` : ''}
+
         <div>
           <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Outage Type</label>
           <div class="flex space-x-4">
             <label class="inline-flex items-center">
               <input type="radio" name="outageType" value="scheduled" class="form-radio text-blue-600" 
-                     ${initialData.type === 'scheduled' ? 'checked' : ''}>
+                      ${initialData.type === 'scheduled' ? 'checked' : ''}>
               <span class="ml-2 text-gray-700 dark:text-gray-300">Scheduled</span>
             </label>
             <label class="inline-flex items-center">
               <input type="radio" name="outageType" value="unscheduled" class="form-radio text-blue-600" 
-                     ${initialData.type !== 'scheduled' ? 'checked' : true}>
+                      ${initialData.type !== 'scheduled' ? 'checked' : true}>
               <span class="ml-2 text-gray-700 dark:text-gray-300">Unscheduled</span>
             </label>
           </div>
@@ -168,13 +349,13 @@ window.showUpdateModal = function(itemIds, context, options = {}) {
         <div>
           <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Cause</label>
           <input type="text" id="causeInput" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700" 
-                 value="${initialData.cause || ''}" placeholder="Enter cause (e.g., 'Transformer Failure')">
+                  value="${initialData.cause || ''}" placeholder="Enter cause (e.g., 'Transformer Failure')">
         </div>
         
         <div>
           <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location</label>
           <input type="text" id="locationInput" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700" 
-                 value="${initialData.barangay || initialData.title?.split(' - ')[1] || ''}" placeholder="Enter specific location">
+                  value="${initialData.barangay || initialData.title?.split(' - ')[1] || ''}" placeholder="Enter specific location">
         </div>
 
         <div>
@@ -184,24 +365,25 @@ window.showUpdateModal = function(itemIds, context, options = {}) {
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Areas Affected</label>
-          <div id="areasButtonContainer" class="flex flex-wrap gap-2 p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50 min-h-[40px]">
-            ${areaButtonsHTML}
-          </div>
-        </div>
-
-        <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Coordinates</label>
-          <label class="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" class="sr-only peer" id="coordinatesToggle" 
-                   ${(initialData.latitude && initialData.longitude) ? 'checked' : ''}>
-            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-            <span class="ml-3 text-sm font-medium text-gray-700 dark:text-gray-300">Use Coordinates</span>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Affected Areas 
+            <span class="text-blue-600 dark:text-blue-400">(${areaInfoHTML})</span>
           </label>
-          <div id="coordinatesInputContainer" class="mt-2 ${(initialData.latitude && initialData.longitude) ? '' : 'hidden'}">
-            <input type="text" id="coordinatesInput" placeholder="Latitude, Longitude" 
-                   class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700" 
-                   value="${(initialData.latitude && initialData.longitude) ? `${initialData.latitude}, ${initialData.longitude}` : ''}">
+          
+          <!-- Select All Toggle -->
+          ${allBarangaysInFeeder.length > 0 ? `
+            <div class="flex items-center mb-3">
+              <input type="checkbox" 
+                    id="selectAllBarangays" 
+                    class="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500">
+              <label for="selectAllBarangays" class="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                Select All ${allBarangaysInFeeder.length} Barangays
+              </label>
+            </div>
+          ` : ''}
+
+          <div id="areasButtonContainer" class="flex flex-wrap gap-2 p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50 min-h-[40px] max-h-32 overflow-y-auto">
+            ${areaButtonsHTML}
           </div>
         </div>
 
@@ -233,7 +415,7 @@ window.showUpdateModal = function(itemIds, context, options = {}) {
         <div>
           <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Estimated Time of Restoration (ETA)</label>
           <input type="datetime-local" id="modalEta" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700" 
-                 value="${initialData.eta ? new Date(initialData.eta).toISOString().slice(0, 16) : ''}">
+                  value="${initialData.eta ? new Date(initialData.eta).toISOString().slice(0, 16) : ''}">
         </div>
       </form>
 
@@ -253,8 +435,26 @@ window.showUpdateModal = function(itemIds, context, options = {}) {
     btn.addEventListener('click', () => modal.remove())
   );
 
-  // Area toggle buttons
-  modal.querySelectorAll('.area-toggle-btn').forEach(btn => {
+  // Area toggle buttons with select all functionality
+  const areaButtons = modal.querySelectorAll('.area-toggle-btn');
+  const selectAllCheckbox = modal.querySelector('#selectAllBarangays');
+  
+  if (selectAllCheckbox && areaButtons.length > 0) {
+    selectAllCheckbox.addEventListener('change', () => {
+      const isChecked = selectAllCheckbox.checked;
+      areaButtons.forEach(btn => {
+        if (isChecked) {
+          btn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700');
+          btn.classList.remove('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300', 'dark:bg-gray-700', 'dark:text-gray-200', 'dark:hover:bg-gray-600');
+        } else {
+          btn.classList.remove('bg-blue-600', 'text-white', 'hover:bg-blue-700');
+          btn.classList.add('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300', 'dark:bg-gray-700', 'dark:text-gray-200', 'dark:hover:bg-gray-600');
+        }
+      });
+    });
+  }
+
+  areaButtons.forEach(btn => {
     btn.addEventListener('click', () => {
       btn.classList.toggle('bg-blue-600');
       btn.classList.toggle('text-white');
@@ -265,6 +465,19 @@ window.showUpdateModal = function(itemIds, context, options = {}) {
       btn.classList.toggle('dark:bg-gray-700');
       btn.classList.toggle('dark:text-gray-200');
       btn.classList.toggle('dark:hover:bg-gray-600');
+      
+      // Update select all checkbox state
+      if (selectAllCheckbox) {
+        const allSelected = Array.from(areaButtons).every(btn => 
+          btn.classList.contains('bg-blue-600')
+        );
+        const someSelected = Array.from(areaButtons).some(btn => 
+          btn.classList.contains('bg-blue-600')
+        );
+        
+        selectAllCheckbox.checked = allSelected;
+        selectAllCheckbox.indeterminate = someSelected && !allSelected;
+      }
     });
   });
 
@@ -273,13 +486,6 @@ window.showUpdateModal = function(itemIds, context, options = {}) {
   const dispatchSection = modal.querySelector('#dispatchTeamSection');
   statusSelect.addEventListener('change', () => 
     dispatchSection.classList.toggle('hidden', statusSelect.value !== 'Ongoing')
-  );
-
-  // Coordinates toggle
-  const coordinatesToggle = modal.querySelector('#coordinatesToggle');
-  const coordinatesInputContainer = modal.querySelector('#coordinatesInputContainer');
-  coordinatesToggle.addEventListener('change', () => 
-    coordinatesInputContainer.classList.toggle('hidden', !coordinatesToggle.checked)
   );
 
   // Image preview
@@ -311,105 +517,214 @@ window.showUpdateModal = function(itemIds, context, options = {}) {
   }
 
   // Form submission
-  modal.querySelector('#updateForm').addEventListener('submit', (e) => {
+  modal.querySelector('#updateForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    
-    const formData = {
-      outageType: modal.querySelector('input[name="outageType"]:checked').value,
-      cause: modal.querySelector('#causeInput').value,
-      location: modal.querySelector('#locationInput').value,
-      status: modal.querySelector('#statusSelect').value,
-      description: modal.querySelector('#modalDescription').value,
-      eta: modal.querySelector('#modalEta').value,
-      dispatchTeam: modal.querySelector('#dispatchTeamSelect')?.value || null,
-      affectedAreas: Array.from(modal.querySelectorAll('.area-toggle-btn.bg-blue-600'))
-        .map(btn => btn.dataset.barangay)
-    };
+    const submitButton = modal.querySelector('button[type="submit"]');
+    submitButton.disabled = true;
+    submitButton.textContent = 'Posting...';
 
-    // Handle coordinates
-    if (coordinatesToggle.checked) {
-      const coords = modal.querySelector('#coordinatesInput').value.split(',');
-      if (coords.length === 2) {
-        formData.latitude = parseFloat(coords[0].trim());
-        formData.longitude = parseFloat(coords[1].trim());
-      }
+    try {
+        const files = modal.querySelector('#modalFileInput').files;
+        const newImageUrls = []; 
+        let isBulk = itemIds.length > 1; // Get isBulk status
+
+        if (files.length > 0) {
+            console.log(`Uploading ${files.length} images...`);
+            for (const file of files) {
+                // Use a 'public' folder for simplicity, or structure as needed
+                const fileName = `public/${Date.now()}-${file.name}`;
+                
+                if (!window.supabase) throw new Error("Supabase client not found.");
+
+                const { data, error } = await supabase.storage
+                    .from('announcements_images') // Bucket name for announcement images
+                    .upload(fileName, file);
+                
+                if (error) {
+                    throw new Error(`Image upload failed: ${error.message}`);
+                }
+                
+                // Get the public URL for the uploaded file
+                const { data: publicUrlData } = supabase.storage
+                    .from('announcements_images')
+                    .getPublicUrl(data.path);
+                
+                newImageUrls.push(publicUrlData.publicUrl);
+            }
+            console.log('New Image URLs:', newImageUrls);
+        }
+
+        // Merge with existing images (if any)
+        const existingImageUrls = initialData.images || [];
+        const allImageUrls = [...existingImageUrls, ...newImageUrls];
+
+        const formData = {
+            outageType: modal.querySelector('input[name="outageType"]:checked').value,
+            cause: modal.querySelector('#causeInput').value,
+            location: modal.querySelector('#locationInput').value,
+            status: modal.querySelector('#statusSelect').value,
+            description: modal.querySelector('#modalDescription').value,
+            eta: modal.querySelector('#modalEta').value,
+            dispatchTeam: modal.querySelector('#dispatchTeamSelect')?.value || null,
+            affectedAreas: Array.from(modal.querySelectorAll('.area-toggle-btn.bg-blue-600'))
+                .map(btn => btn.dataset.barangay),
+            imageUrls: allImageUrls // Use the merged list
+        };
+
+        console.log('Form submission data:', formData);
+
+        // Call context-specific update handler
+        if (context === 'reports') {
+            await handleReportsUpdate(allAssociatedIds, formData, feederId);
+        } else if (context === 'outages') {
+            await handleOutagesUpdate(allAssociatedIds, formData, feederId);
+        }
+
+        modal.remove();
+
+    } catch (error) {
+        console.error('Error during submission:', error);
+        window.showErrorPopup(error.message);
+        submitButton.disabled = false;
+        // Reset button text
+        let isBulk = itemIds.length > 1; 
+        submitButton.textContent = isBulk ? 'Post Bulk Announcement' : 'Update Announcement';
     }
-
-    // Call context-specific update handler
-    if (context === 'reports') {
-      handleReportsUpdate(allAssociatedIds, formData);
-    } else if (context === 'outages') {
-      handleOutagesUpdate(allAssociatedIds, formData);
-    }
-
-    modal.remove();
   });
+
+} catch (error) {
+  console.error('Error in showUpdateModal:', error);
+  window.showErrorPopup('Failed to load announcement data: ' + error.message);
+}
 };
 
 /**
  * Handle reports update (mock implementation)
  */
-function handleReportsUpdate(reportIds, formData) {
-  console.log(`Updating ${reportIds.length} reports:`, formData);
-  
-  // Update mock data
-  reportIds.forEach(id => {
-    const reportIndex = window.mockAllReports.findIndex(r => r.id === id);
-    if (reportIndex !== -1) {
-      window.mockAllReports[reportIndex].status = formData.status;
-      // Update other fields as needed
-    }
-  });
+async function handleReportsUpdate(reportIds, formData, feederId) {
+  console.log(`Pushing new announcement for ${reportIds.length} reports:`, formData);
 
-  window.showSuccessPopup(`Announcement posted as "${formData.status}"! Reports moved to Outages page.`);
-  
-  // Refresh view if refresh function exists
-  if (typeof window.refreshCurrentView === 'function') {
-    window.refreshCurrentView();
+  if (!window.supabase) {
+      console.error('Supabase client not found.');
+      window.showErrorPopup('Database connection failed.');
+      return;
+  }
+
+  // Map form data to the 'announcements' table schema
+  const announcementData = {
+      feeder_id: feederId ? parseInt(feederId) : null,
+      report_ids: reportIds,
+      type: formData.outageType,
+      cause: formData.cause || null,
+      location: formData.location || null,
+      pictures: formData.imageUrls.length > 0 ? formData.imageUrls : null,
+      areas_affected: formData.affectedAreas.length > 0 ? formData.affectedAreas : null,
+      barangay: formData.affectedAreas.length > 0 ? formData.affectedAreas[0] : null, // Use first affected barangay as primary
+      status: formData.status,
+      description: formData.description || null,
+      estimated_restoration_at: formData.eta || null
+      // created_at and updated_at are handled by DB default
+  };
+
+  console.log('Inserting to announcements:', announcementData);
+
+  try {
+      const { data, error } = await supabase
+          .from('announcements')
+          .insert([announcementData])
+          .select(); // Select the inserted data
+
+      if (error) {
+          throw error;
+      }
+
+      console.log('Supabase insert success:', data);
+      window.showSuccessPopup(`Announcement posted as "${formData.status}"!`);
+
+      // TODO: Update the status of the original reports in the 'reports' table
+      if (reportIds && reportIds.length > 0) {
+          const { error: updateError } = await supabase
+            .from('reports')
+            .update({ status: 'Ongoing' }) // Or 'Reported', depending on your flow
+            .in('id', reportIds);
+          
+          if (updateError) {
+              console.error('Error updating reports status:', updateError);
+              window.showErrorPopup('Announcement posted, but failed to update reports.');
+          }
+      }
+
+      // Refresh view if refresh function exists
+      if (typeof window.refreshCurrentView === 'function') {
+          window.refreshCurrentView();
+      }
+      
+  } catch (error) {
+      console.error('Error posting announcement:', error.message);
+      window.showErrorPopup(`Error posting announcement: ${error.message}`);
   }
 }
+
 
 /**
  * Handle outages update (mock implementation)
  */
-function handleOutagesUpdate(outageIds, formData) {
-  console.log(`Updating ${outageIds.length} outages:`, formData);
-  
-  // Generate title from cause and location
-  const title = `${formData.cause} - ${formData.location}`;
-  
-  // Update mock data
-  outageIds.forEach(id => {
-    const outageIndex = window.mockOutages.findIndex(o => o.id === id);
-    if (outageIndex !== -1) {
-      Object.assign(window.mockOutages[outageIndex], {
-        title: title,
-        description: formData.description,
-        status: formData.status,
-        type: formData.outageType,
-        affected_areas: formData.affectedAreas,
-        eta: formData.eta || null,
-        latitude: formData.latitude || null,
-        longitude: formData.longitude || null,
-        dispatch_team: formData.dispatchTeam
-      });
-    }
-  });
+async function handleOutagesUpdate(outageIds, formData, feederId) {
+  console.log(`Updating ${outageIds.length} outages/announcements:`, formData);
 
-  window.showSuccessPopup("Outage updated successfully!");
-  
-  // Refresh view if applyFiltersAndRender function exists
-  if (typeof window.applyFiltersAndRender === 'function') {
-    window.applyFiltersAndRender();
+  if (!window.supabase) {
+      console.error('Supabase client not found.');
+      window.showErrorPopup('Database connection failed.');
+      return;
+  }
+
+  // Map form data to the 'announcements' table schema for updating
+  const announcementData = {
+      feeder_id: feederId ? parseInt(feederId) : null,
+      type: formData.outageType,
+      cause: formData.cause || null,
+      location: formData.location || null,
+      pictures: formData.imageUrls.length > 0 ? formData.imageUrls : null,
+      areas_affected: formData.affectedAreas.length > 0 ? formData.affectedAreas : null,
+      barangay: formData.affectedAreas.length > 0 ? formData.affectedAreas[0] : null,
+      status: formData.status,
+      description: formData.description || null,
+      estimated_restoration_at: formData.eta || null,
+      updated_at: new Date().toISOString() // Manually set updated_at
+  };
+
+  console.log('Updating announcements:', announcementData);
+
+  try {
+      const { data, error } = await supabase
+          .from('announcements')
+          .update(announcementData)
+          .in('id', outageIds); // Apply update to all selected IDs
+
+      if (error) {
+          throw error;
+      }
+      
+      console.log('Supabase update success:', data);
+      window.showSuccessPopup("Outage updated successfully!");
+
+      // Refresh view if applyFiltersAndRender function exists (e.g., on outages.js)
+      if (typeof window.applyFiltersAndRender === 'function') {
+          window.applyFiltersAndRender();
+      }
+
+  } catch (error) {
+      console.error('Error updating announcement:', error.message);
+      window.showErrorPopup(`Error updating announcement: ${error.message}`);
   }
 }
 
 // --- MAIN SCRIPT LOGIC ---
 
 document.addEventListener("DOMContentLoaded", () => {
-  console.log("shared.js v5: DOMContentLoaded");
+  console.log("shared.js v6 (Merged): DOMContentLoaded");
 
-  // --- Universal Filter Callback ---
+  // --- Universal Filter Callback (from sharedog.js) ---
   const callPageFilter = () => {
       if (typeof window.applyFilters === "function") {
           window.applyFilters();
@@ -418,7 +733,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
   };
 
-  // --- Sidebar Highlighting ---
+  // --- Sidebar Highlighting (from sharedog.js) ---
   try {
     const links = document.querySelectorAll(".sidebar-link");
     const pathSegments = window.location.pathname.split('/');
@@ -442,7 +757,7 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("shared.js: Error during sidebar highlighting:", error);
   }
 
-  // --- Date Dropdown Logic ---
+  // --- Date Dropdown Logic (from sharedog.js) ---
   const dateBtn = document.getElementById("dateDropdownBtn");
   if (dateBtn) {
     try {
@@ -487,7 +802,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // --- Feeder Filter UI Logic (SHARED) ---
+  // --- Feeder Filter UI Logic (from sharedog.js) ---
   const feederBtn = document.getElementById("feederFilterBtn");
   const feederPopup = document.getElementById("feederPopup");
   if (feederBtn && feederPopup) {
@@ -523,7 +838,7 @@ document.addEventListener("DOMContentLoaded", () => {
       feederSelectAll?.addEventListener("click", () => setTogglesState(true));
   }
 
-  // --- Search Input Logic (SHARED) ---
+  // --- Search Input Logic (from sharedog.js) ---
   const searchInput = document.getElementById("locationSearch");
   if (searchInput) {
       let debounceTimer;
@@ -533,7 +848,7 @@ document.addEventListener("DOMContentLoaded", () => {
       });
   }
 
-  // --- Profile Dropdown & Modal Logic ---
+  // --- Profile Dropdown & Modal Logic (from sharedog.js) ---
   const openProfileModalBtn = document.getElementById('openProfileModalBtn');
   const profileModal = document.getElementById('profileModal');
   const closeProfileModalBtn = document.getElementById('closeProfileModalBtn');
@@ -587,20 +902,17 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && profileModal && !profileModal.classList.contains('hidden')) closeModal(); });
 
   // 3. Logout Button Logic
-// --- Logout Button Logic (SIMPLIFIED TEST) ---
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) {
-    console.log("DEBUG: Logout button found, adding SIMPLIFIED listener.");
+    console.log("DEBUG: Logout button found, adding listener.");
     logoutBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      console.log("DEBUG: SIMPLIFIED Logout CLICKED.");
-      alert("Attempting redirect now..."); // Use a simple alert
+      console.log("DEBUG: Logout CLICKED.");
       try {
           window.location.href = 'login.html';
-          console.log("DEBUG: Redirect command executed."); // Log if the line is reached
+          console.log("DEBUG: Redirect command executed.");
       } catch (redirectError) {
-          console.error("DEBUG: Error during redirect attempt:", redirectError); // Log any error during redirect itself
-          alert("Redirect failed. Check console.");
+          console.error("DEBUG: Error during redirect attempt:", redirectError);
       }
     });
   } else {
@@ -628,6 +940,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
           if (newPassword) {
               console.warn("Password update functionality not yet implemented.");
+              // In a real app, you would hash and send this to a server.
               updated = true;
           }
 
@@ -644,8 +957,9 @@ document.addEventListener("DOMContentLoaded", () => {
       profilePicInput.addEventListener('change', function() {
           const file = this.files[0];
           if (file) {
-              if (file.size > 5 * 1024 * 1024) {
-                  alert("Image file is too large. Please select a file under 5MB.");
+              if (file.size > 5 * 1024 * 1024) { // 5MB limit
+                  console.error("Image file is too large.");
+                  window.showErrorPopup("Image file is too large (Max 5MB).");
                   profilePicInput.value = '';
                   return;
               }
@@ -658,7 +972,7 @@ document.addEventListener("DOMContentLoaded", () => {
                       localStorage.setItem('adminProfilePic', imageDataUrl);
                   } catch (err) {
                       console.error("Error saving profile picture to localStorage:", err);
-                      alert("Could not save profile picture. Browser storage may be full.");
+                      window.showErrorPopup("Could not save profile picture.");
                   }
               }
               reader.readAsDataURL(file);
@@ -666,18 +980,18 @@ document.addEventListener("DOMContentLoaded", () => {
       });
   }
 
-  // Add this inside the DOMContentLoaded listener in shared.js
-
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js')
-      .then(registration => {
-        console.log('Service Worker registered successfully:', registration);
-      })
-      .catch(error => {
-        console.error('Service Worker registration failed:', error);
-      });
-  });
-}
+  // --- Service Worker (from sharedog.js) ---
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/service-worker.js')
+        .then(registration => {
+          console.log('Service Worker registered successfully:', registration);
+        })
+        .catch(error => {
+          console.error('Service Worker registration failed:', error);
+        });
+    });
+  }
 
 }); // End DOMContentLoaded
+
