@@ -38,8 +38,10 @@
   </script>
 
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -146,7 +148,7 @@
                 </div>
               </div>
               <p class="text-3xl font-bold text-red-600 mt-4" id="value-total">0</p>
-              <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">Compared to yesterday</p>
+              <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">As of today</p>
             </div>
 
             <div class="relative bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md hover:-translate-y-2 hover:scale-[1.03] hover:shadow-xl dark:hover:shadow-gray-900/50 cursor-pointer transition">
@@ -159,7 +161,7 @@
                 </div>
               </div>
               <p class="text-3xl font-bold text-yellow-500 mt-4" id="value-active">0</p>
-              <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">Compared to yesterday</p>
+              <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">As of today</p>
             </div>
 
             <div class="relative bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md hover:-translate-y-2 hover:scale-[1.03] hover:shadow-xl dark:hover:shadow-gray-900/50 cursor-pointer transition">
@@ -172,7 +174,7 @@
                 </div>
               </div>
               <p class="text-3xl font-bold text-green-600 mt-4" id="value-completed">0</p>
-              <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">Compared to yesterday</p>
+              <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">As of today</p>
             </div>
           </div>
 
@@ -183,7 +185,7 @@
                 <thead>
                   <tr class="text-sm text-gray-500 dark:text-gray-400 border-b dark:border-gray-700">
                     <th class="py-3 px-4 font-medium">Report ID</th>
-                    <th class="py-3 px-4 font-medium">Area</th>
+                    <th class="py-3 px-4 font-medium">Common Cause</th>
                     <th class="py-3 px-4 font-medium">Feeder</th>
                     <th class="py-3 px-4 font-medium">Reported</th>
                     <th class="py-3 px-4 font-medium">Status</th>
@@ -209,7 +211,6 @@
 
           <h3 class="text-xl font-semibold mb-4 text-gray-700 dark:text-gray-300 flex items-center">
             Analytics
-            <span class="material-icons text-sm ml-1">expand_more</span>
           </h3>
 
           <div class="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-8">
@@ -250,7 +251,11 @@
                   </div>
                 </div>
               </div>
-              <canvas id="feederChartCanvas" class="w-full h-70"></canvas>
+              <div class="chart-wrapper h-72 w-full">
+                <canvas id="feederChartCanvas" class="w-full h-70">
+                  <!-- Chart will be rendered here -->
+                </canvas>
+              </div>
               <p id="feederChartLabel" class="mt-auto text-sm text-gray-600 dark:text-gray-300">All feeders selected</p>
             </div>
 
@@ -290,10 +295,49 @@
                   </div>
                 </div>
               </div>
-              <canvas id="restorationChartCanvas" class="w-full h-70"></canvas>
+              <div class="chart-wrapper h-72 w-full">
+                <canvas id="restorationChartCanvas" class="w-full h-70">
+                  <!-- Chart will be rendered here -->
+                </canvas>
+              </div>
               <p id="restorationChartLabel" class="mt-auto text-sm text-gray-600 dark:text-gray-300">All feeders selected</p>
             </div>
+            <div class="lg:col-span-5 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md flex flex-col mb-8 relative">
+  
+            <h4 class="font-semibold text-gray-700 dark:text-gray-300 text-lg mb-4">
+              Outage Density Heatmap
+            </h4>
 
+            <!-- Toggle button at top right -->
+            <div class="absolute top-6 right-6 z-50">
+              <button id="heatmapFilterBtn" class="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md text-sm flex items-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors relative">
+                <span class="material-icons text-sm">filter_list</span>
+                Filter
+              </button>
+
+              <div id="heatmapFilterPopup" class="hidden absolute right-0 mt-2 w-44 bg-white dark:bg-gray-800 rounded-md shadow-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2 z-50">
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="heatmapFilter" value="pending" checked>
+                  <span class="text-gray-700 dark:text-gray-300 text-sm">Pending only</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="heatmapFilter" value="reported_ongoing">
+                  <span class="text-gray-700 dark:text-gray-300 text-sm">Reported + Ongoing</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="heatmapFilter" value="all">
+                  <span class="text-gray-700 dark:text-gray-300 text-sm">All</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Map container -->
+            <div id="map" class="w-full h-[700px] rounded-xl overflow-hidden shadow-md border border-black-200 dark:border-gray-600 z-0"></div>
+            
+            <p class="text-sm text-gray-500 dark:text-gray-400 mt-2 text-center">
+              Map data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" class="underline">OpenStreetMap contributors</a>
+            </p>
+          </div>
           </div>
           
           <div id="barangayBreakdown" class="hidden bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md mt-6">
@@ -382,6 +426,7 @@
             </div>
         </form>
     </div>
+
 </div>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

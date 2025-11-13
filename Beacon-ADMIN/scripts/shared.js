@@ -1,5 +1,5 @@
 // ==========================
-// SHARED SCRIPT (v6 - Merged)
+// SHARED SCRIPT (v7 - Schema Update)
 // (Contains universal utilities, UI logic, unified modals, and all page/filter event listeners)
 // ==========================
 // Loaded SECOND on every page
@@ -152,24 +152,64 @@ try {
       });
     }
   } else if (context === 'outages') {
-    // For outages, get from mockOutages or global data
-    const outagesData = window.mockOutages || [];
-    console.log('Outages data available:', outagesData.length);
-    
-    itemsData = outagesData.filter(o => itemIds.includes(o.id));
-    console.log('Filtered outages data:', itemsData);
-    
-    allAssociatedIds = itemIds;
-    
-    // Get selected barangays from outages
-    itemsData.forEach(item => {
-      if (item.affected_areas && Array.isArray(item.affected_areas)) {
-        item.affected_areas.forEach(area => selectedBarangays.add(area));
-      } else if (item.barangay) {
-        selectedBarangays.add(item.barangay);
-      }
-    });
+  if (!window.supabase) {
+    console.error("Supabase client missing.");
+    return;
   }
+
+  // =================================================================
+  // ✅ MODIFICATION 1: Fetch related images from announcement_images
+  // =================================================================
+  const { data, error } = await supabase
+    .from('announcements')
+    .select('*, announcement_images ( id, image_url )') // Fetch related images
+    .in('id', itemIds);
+
+  if (error) {
+    console.error("Failed to load announcement data:", error);
+    window.showErrorPopup("Failed to load outage details.");
+    return;
+  }
+
+  // Map data to create the `images` array the modal expects
+  itemsData = data.map(item => {
+    // Get URLs from the new related table
+    const newImageUrls = item.announcement_images 
+      ? item.announcement_images.map(img => img.image_url) 
+      : [];
+    
+    // Fallback for any URLs still in the old 'pictures' or 'picture' columns
+    const oldImageUrls = Array.isArray(item.pictures) ? item.pictures : [];
+    const singleImageUrl = item.picture ? [item.picture] : [];
+    
+    // Combine all and remove duplicates
+    const allImageUrls = [
+      ...new Set([
+        ...newImageUrls, 
+        ...oldImageUrls, 
+        ...singleImageUrl
+      ])
+    ];
+
+    return {
+      ...item,
+      images: allImageUrls // This `images` property is used by the preview logic
+    };
+  });
+  // =================================================================
+  // ✅ END MODIFICATION 1
+  // =================================================================
+
+  allAssociatedIds = itemIds;
+
+  itemsData.forEach(item => {
+    if (item.areas_affected && Array.isArray(item.areas_affected)) {
+      item.areas_affected.forEach(a => selectedBarangays.add(a));
+    }
+    if (!feederId && item.feeder_id) feederId = item.feeder_id;
+  });
+}
+
 
   // If no items found, show error and return
   if (itemsData.length === 0 && allAssociatedIds.length === 0) {
@@ -273,38 +313,45 @@ try {
     }
   }
 
-  // Generate area buttons with better error handling
+  // Generate area buttons + info
   let areaButtonsHTML = '';
   let areaInfoHTML = '';
 
   if (allBarangaysInFeeder.length > 0) {
+
+    // ✅ Put this back — this was missing
     areaInfoHTML = `Feeder ${feederId || 'N/A'} - ${allBarangaysInFeeder.length} barangays`;
+
     areaButtonsHTML = allBarangaysInFeeder.map(barangay => {
-      const isSelected = selectedBarangays.has(barangay);
-      return `<button type="button" class="area-toggle-btn px-3 py-1.5 rounded-full text-sm font-medium transition ${
-        isSelected
-          ? 'bg-blue-600 text-white hover:bg-blue-700'
-          : 'bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
-      }" data-barangay="${barangay}">${barangay}</button>`;
+      const isSelected = selectedBarangays.has(barangay); // ✅ auto-select
+      return `
+        <button type="button"
+          class="area-toggle-btn px-3 py-1.5 rounded-full text-sm font-medium transition
+          ${isSelected
+            ? 'bg-blue-600 text-white hover:bg-blue-700'
+            : 'bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'
+          }"
+          data-barangay="${barangay}">
+          ${barangay}
+        </button>`;
     }).join('');
+
   } else {
     areaInfoHTML = 'No barangays configured';
     areaButtonsHTML = `
       <div class="text-center p-4">
         <p class="text-red-500 text-sm mb-2">No barangays found for this feeder</p>
         <p class="text-gray-500 text-xs">
-          Please check that:<br>
-          1. The feeder_barangays table has data<br>
-          2. Feeder ${feederId} exists in the table<br>
-          3. Barangays are properly linked to feeders
+          Please check feeder_barangays relationships.
         </p>
       </div>
     `;
   }
 
+
   // Create modal HTML
   const modal = document.createElement('div');
-  modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+  modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4';
   modal.id = 'updateModal';
   
   modal.innerHTML = `
@@ -319,7 +366,6 @@ try {
       </div>
 
       <form id="updateForm" class="p-6 space-y-4 overflow-y-auto">
-        <!-- Feeder Info Display -->
         ${feederId ? `
           <div class="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
             <label class="block text-sm font-medium text-blue-700 dark:text-blue-300 mb-1">Feeder Group</label>
@@ -351,11 +397,13 @@ try {
           <input type="text" id="causeInput" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700" 
                   value="${initialData.cause || ''}" placeholder="Enter cause (e.g., 'Transformer Failure')">
         </div>
-        
+
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location</label>
-          <input type="text" id="locationInput" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700" 
-                  value="${initialData.barangay || initialData.title?.split(' - ')[1] || ''}" placeholder="Enter specific location">
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Location (Text)</label>
+          <input type="text" id="locationInput" 
+                class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700" 
+                value="${initialData.location || ''}" 
+                placeholder="Ex: Purok 5 near Barangay Hall">
         </div>
 
         <div>
@@ -370,7 +418,6 @@ try {
             <span class="text-blue-600 dark:text-blue-400">(${areaInfoHTML})</span>
           </label>
           
-          <!-- Select All Toggle -->
           ${allBarangaysInFeeder.length > 0 ? `
             <div class="flex items-center mb-3">
               <input type="checkbox" 
@@ -417,17 +464,36 @@ try {
           <input type="datetime-local" id="modalEta" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700" 
                   value="${initialData.eta ? new Date(initialData.eta).toISOString().slice(0, 16) : ''}">
         </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Map Coordinates</label>
+
+        <div class="flex items-center space-x-2 mb-2">
+            <input type="checkbox" id="enableCoordinates" class="h-4 w-4 text-blue-600 border-gray-300 rounded">
+            <label for="enableCoordinates" class="text-sm text-gray-700 dark:text-gray-300">
+            Specify custom outage location on map
+            </label>
+        </div>
+
+        <input type="text" id="coordinateInput"
+              placeholder="e.g., 16.414102, 120.595055"
+              class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 hidden">
+      </div>
       </form>
 
       <div class="flex justify-end space-x-3 p-6 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-        <button type="button" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition close-modal">Cancel</button>
-        <button type="submit" form="updateForm" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition">
-          ${isBulk ? 'Post Bulk Announcement' : 'Update Announcement'}
+        <button 
+            type="submit" 
+            form="updateForm" 
+            class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition"
+            id="modalUpdateBtn"
+            ${initialData.status === 'Completed' && context === 'outages' ? 'disabled style="background-color: #d1d5db; color: #6b7280; cursor: not-allowed; border: none;"' : ''}
+          >
+            ${isBulk ? 'Post Bulk Announcement' : 'Update Announcement'}
         </button>
       </div>
     </div>
   `;
-
   document.body.appendChild(modal);
 
   // --- Modal Event Listeners ---
@@ -435,51 +501,73 @@ try {
     btn.addEventListener('click', () => modal.remove())
   );
 
+
+  // Coordinate input toggle
+  const enableCoordinates = modal.querySelector('#enableCoordinates');
+  const coordinateInput = modal.querySelector('#coordinateInput');
+
+  // ✅ Pre-fill coordinates if existing
+  if (initialData.latitude && initialData.longitude) {
+    enableCoordinates.checked = true;
+    coordinateInput.classList.remove('hidden');
+    coordinateInput.value = `${initialData.latitude}, ${initialData.longitude}`;
+  }
+
+  enableCoordinates.addEventListener('change', () => {
+    coordinateInput.classList.toggle('hidden', !enableCoordinates.checked);
+  });
+
   // Area toggle buttons with select all functionality
   const areaButtons = modal.querySelectorAll('.area-toggle-btn');
   const selectAllCheckbox = modal.querySelector('#selectAllBarangays');
-  
-  if (selectAllCheckbox && areaButtons.length > 0) {
-    selectAllCheckbox.addEventListener('change', () => {
-      const isChecked = selectAllCheckbox.checked;
-      areaButtons.forEach(btn => {
-        if (isChecked) {
-          btn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700');
-          btn.classList.remove('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300', 'dark:bg-gray-700', 'dark:text-gray-200', 'dark:hover:bg-gray-600');
-        } else {
-          btn.classList.remove('bg-blue-600', 'text-white', 'hover:bg-blue-700');
-          btn.classList.add('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300', 'dark:bg-gray-700', 'dark:text-gray-200', 'dark:hover:bg-gray-600');
-        }
-      });
-    });
-  }
+  let selectedAreas = new Set(selectedBarangays);
 
-  areaButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      btn.classList.toggle('bg-blue-600');
-      btn.classList.toggle('text-white');
-      btn.classList.toggle('hover:bg-blue-700');
-      btn.classList.toggle('bg-gray-200');
-      btn.classList.toggle('text-gray-800');
-      btn.classList.toggle('hover:bg-gray-300');
-      btn.classList.toggle('dark:bg-gray-700');
-      btn.classList.toggle('dark:text-gray-200');
-      btn.classList.toggle('dark:hover:bg-gray-600');
-      
-      // Update select all checkbox state
-      if (selectAllCheckbox) {
-        const allSelected = Array.from(areaButtons).every(btn => 
-          btn.classList.contains('bg-blue-600')
-        );
-        const someSelected = Array.from(areaButtons).some(btn => 
-          btn.classList.contains('bg-blue-600')
-        );
-        
-        selectAllCheckbox.checked = allSelected;
-        selectAllCheckbox.indeterminate = someSelected && !allSelected;
+  if (selectAllCheckbox) {
+  selectAllCheckbox.addEventListener('change', () => {
+    const isChecked = selectAllCheckbox.checked;
+    areaButtons.forEach(btn => {
+      const barangay = btn.dataset.barangay;
+      if (isChecked) {
+        selectedAreas.add(barangay);
+        btn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700');
+        btn.classList.remove('bg-gray-200','text-gray-800','hover:bg-gray-300','dark:bg-gray-700','dark:text-gray-200','dark:hover:bg-gray-600');
+      } else {
+        selectedAreas.delete(barangay);
+        btn.classList.remove('bg-blue-600','text-white','hover:bg-blue-700');
+        btn.classList.add('bg-gray-200','text-gray-800','hover:bg-gray-300','dark:bg-gray-700','dark:text-gray-200','dark:hover:bg-gray-600');
       }
     });
   });
+}
+
+  areaButtons.forEach(btn => {
+  const barangay = btn.dataset.barangay;
+
+  // Ensure visual state matches selected set on load
+  if (selectedAreas.has(barangay)) {
+    btn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700');
+    btn.classList.remove('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300', 'dark:bg-gray-700', 'dark:text-gray-200', 'dark:hover:bg-gray-600');
+  }
+
+  btn.addEventListener('click', () => {
+    if (selectedAreas.has(barangay)) {
+      selectedAreas.delete(barangay);
+      btn.classList.remove('bg-blue-600', 'text-white', 'hover:bg-blue-700');
+      btn.classList.add('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300', 'dark:bg-gray-700', 'dark:text-gray-200', 'dark:hover:bg-gray-600');
+    } else {
+      selectedAreas.add(barangay);
+      btn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700');
+      btn.classList.remove('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300', 'dark:bg-gray-700', 'dark:text-gray-200', 'dark:hover:bg-gray-600');
+    }
+
+    // Update select-all checkbox state
+    if (selectAllCheckbox) {
+      selectAllCheckbox.checked = selectedAreas.size === areaButtons.length;
+      selectAllCheckbox.indeterminate = selectedAreas.size > 0 && selectedAreas.size < areaButtons.length;
+    }
+  });
+});
+
 
   // Status change handler
   const statusSelect = modal.querySelector('#statusSelect');
@@ -507,6 +595,8 @@ try {
   });
 
   // Pre-populate image preview if existing images
+  // This works because `initialData.images` was set correctly
+  // by the logic in MODIFICATION 1
   if (initialData.images && initialData.images.length > 0) {
     initialData.images.forEach(imgSrc => {
       const img = document.createElement('img');
@@ -555,21 +645,38 @@ try {
         }
 
         // Merge with existing images (if any)
+        // This works because `initialData.images` was set correctly
         const existingImageUrls = initialData.images || [];
         const allImageUrls = [...existingImageUrls, ...newImageUrls];
 
+        // ✅ Parse coordinates if toggle enabled
+        const coordText = coordinateInput && !coordinateInput.classList.contains('hidden')
+          ? coordinateInput.value.trim()
+          : null;
+
+        let latitude = null;
+        let longitude = null;
+
+        if (coordText && coordText.includes(',')) {
+          const [latStr, lngStr] = coordText.split(',').map(x => x.trim());
+          latitude = parseFloat(latStr);
+          longitude = parseFloat(lngStr);
+        }
+
         const formData = {
-            outageType: modal.querySelector('input[name="outageType"]:checked').value,
-            cause: modal.querySelector('#causeInput').value,
-            location: modal.querySelector('#locationInput').value,
-            status: modal.querySelector('#statusSelect').value,
-            description: modal.querySelector('#modalDescription').value,
-            eta: modal.querySelector('#modalEta').value,
-            dispatchTeam: modal.querySelector('#dispatchTeamSelect')?.value || null,
-            affectedAreas: Array.from(modal.querySelectorAll('.area-toggle-btn.bg-blue-600'))
-                .map(btn => btn.dataset.barangay),
-            imageUrls: allImageUrls // Use the merged list
+          outageType: modal.querySelector('input[name="outageType"]:checked').value,
+          cause: modal.querySelector('#causeInput').value,
+          location: modal.querySelector('#locationInput').value,
+          status: modal.querySelector('#statusSelect').value,
+          description: modal.querySelector('#modalDescription').value,
+          eta: modal.querySelector('#modalEta').value,
+          // dispatchTeam: modal.querySelector('#dispatchTeamSelect')?.value || null,
+          affectedAreas: Array.from(selectedAreas),
+          imageUrls: allImageUrls, // This is the *complete* set of URLs
+          latitude,    // ✅ NEW
+          longitude    // ✅ NEW
         };
+
 
         console.log('Form submission data:', formData);
 
@@ -599,75 +706,118 @@ try {
 };
 
 /**
- * Handle reports update (mock implementation)
+ * Handle reports update
+ */
+/**
+ * Handle reports update - converts reports to announcements
+ * @param {Array} reportIds - Array of report IDs to update
+ * @param {Object} formData - Form data from modal
+ * @param {number} feederId - Feeder ID
  */
 async function handleReportsUpdate(reportIds, formData, feederId) {
-  console.log(`Pushing new announcement for ${reportIds.length} reports:`, formData);
+  console.log(`Updating ${reportIds.length} reports (converting to announcements):`, formData);
 
   if (!window.supabase) {
-      console.error('Supabase client not found.');
-      window.showErrorPopup('Database connection failed.');
-      return;
+    console.error('Supabase client not found.');
+    window.showErrorPopup('Database connection failed.');
+    return;
   }
 
-  // Map form data to the 'announcements' table schema
+  // =================================================================
+  // ✅ MODIFICATION 2: Remove 'pictures' from announcementData
+  // =================================================================
   const announcementData = {
-      feeder_id: feederId ? parseInt(feederId) : null,
-      report_ids: reportIds,
-      type: formData.outageType,
-      cause: formData.cause || null,
-      location: formData.location || null,
-      pictures: formData.imageUrls.length > 0 ? formData.imageUrls : null,
-      areas_affected: formData.affectedAreas.length > 0 ? formData.affectedAreas : null,
-      barangay: formData.affectedAreas.length > 0 ? formData.affectedAreas[0] : null, // Use first affected barangay as primary
-      status: formData.status,
-      description: formData.description || null,
-      estimated_restoration_at: formData.eta || null
-      // created_at and updated_at are handled by DB default
+    feeder_id: feederId ? parseInt(feederId) : null,
+    type: formData.outageType,
+    cause: formData.cause || null,
+    location: formData.location || null,
+    // pictures: formData.imageUrls.length > 0 ? formData.imageUrls : null, // <-- REMOVED
+    areas_affected: formData.affectedAreas.length > 0 ? formData.affectedAreas : null,
+    barangay: formData.affectedAreas.length > 0 ? formData.affectedAreas[0] : null,
+    status: formData.status,
+    description: formData.description || null,
+    estimated_restoration_at: formData.eta || null,
+    latitude: formData.latitude,
+    longitude: formData.longitude,
+    // dispatch_team: formData.dispatchTeam !== 'None' ? formData.dispatchTeam : null,
+    created_at: new Date().toISOString()
   };
 
-  console.log('Inserting to announcements:', announcementData);
+  console.log('Creating announcement from reports:', announcementData);
 
   try {
-      const { data, error } = await supabase
-          .from('announcements')
-          .insert([announcementData])
-          .select(); // Select the inserted data
+    // 1. Insert new announcement
+    const { data, error } = await supabase
+      .from('announcements')
+      .insert([announcementData])
+      .select(); // Must .select() to get the ID of the new row
 
-      if (error) {
-          throw error;
+    if (error) {
+      throw error;
+    }
+
+    const newAnnouncement = data[0]; // Get the newly created announcement
+    console.log('Announcement created successfully:', newAnnouncement);
+
+    // 2. NEW LOGIC: Insert images into announcement_images table
+    if (formData.imageUrls && formData.imageUrls.length > 0) {
+      const imageInserts = formData.imageUrls.map(url => ({
+        announcement_id: newAnnouncement.id,
+        image_url: url
+        // We assume `image_url` is the correct column,
+        // not `pictures` in the `announcement_images` table
+      }));
+
+      const { error: imageError } = await supabase
+        .from('announcement_images')
+        .insert(imageInserts);
+
+      if (imageError) {
+        // Log the error but don't fail the whole operation,
+        // as the announcement itself was created.
+        console.error('Error inserting announcement images:', imageError);
+        window.showErrorPopup('Announcement created, but failed to save images.');
       }
+    }
+    // =================================================================
+    // ✅ END MODIFICATION 2
+    // =================================================================
 
-      console.log('Supabase insert success:', data);
-      window.showSuccessPopup(`Announcement posted as "${formData.status}"!`);
+    // 3. Now update the original reports to mark them as processed/announced
+    if (reportIds.length > 0) {
+      const { error: updateError } = await supabase
+        .from('reports')
+        .update({ 
+          status: 'Announced',
+          announced_at: new Date().toISOString()
+        })
+        .in('id', reportIds);
 
-      // TODO: Update the status of the original reports in the 'reports' table
-      if (reportIds && reportIds.length > 0) {
-          const { error: updateError } = await supabase
-            .from('reports')
-            .update({ status: 'Ongoing' }) // Or 'Reported', depending on your flow
-            .in('id', reportIds);
-          
-          if (updateError) {
-              console.error('Error updating reports status:', updateError);
-              window.showErrorPopup('Announcement posted, but failed to update reports.');
-          }
+      if (updateError) {
+        console.error('Error updating report status:', updateError);
+        // Don't throw - announcement was created successfully
       }
+    }
 
-      // Refresh view if refresh function exists
-      if (typeof window.refreshCurrentView === 'function') {
-          window.refreshCurrentView();
-      }
-      
+    window.showSuccessPopup("Reports converted to announcement successfully!");
+
+    // Refresh reports list UI
+    if (typeof window.applyFiltersAndRender === 'function') {
+      window.applyFiltersAndRender();
+    }
+
+    // Refresh MAP if present
+    if (typeof window.loadAnnouncementsToMap === "function") {
+      window.loadAnnouncementsToMap();
+    }
   } catch (error) {
-      console.error('Error posting announcement:', error.message);
-      window.showErrorPopup(`Error posting announcement: ${error.message}`);
+    console.error('Error creating announcement from reports:', error.message);
+    window.showErrorPopup(`Error creating announcement: ${error.message}`);
   }
 }
 
-
 /**
- * Handle outages update (mock implementation)
+ * Handle outages updates
  */
 async function handleOutagesUpdate(outageIds, formData, feederId) {
   console.log(`Updating ${outageIds.length} outages/announcements:`, formData);
@@ -678,24 +828,31 @@ async function handleOutagesUpdate(outageIds, formData, feederId) {
       return;
   }
 
-  // Map form data to the 'announcements' table schema for updating
+  // =================================================================
+  // ✅ MODIFICATION 3: Remove 'pictures' and add image sync logic
+  // =================================================================
+
+  // 1. Map form data for the 'announcements' table (NO images)
   const announcementData = {
       feeder_id: feederId ? parseInt(feederId) : null,
       type: formData.outageType,
       cause: formData.cause || null,
       location: formData.location || null,
-      pictures: formData.imageUrls.length > 0 ? formData.imageUrls : null,
+      // pictures: formData.imageUrls.length > 0 ? formData.imageUrls : null, // <-- REMOVED
       areas_affected: formData.affectedAreas.length > 0 ? formData.affectedAreas : null,
       barangay: formData.affectedAreas.length > 0 ? formData.affectedAreas[0] : null,
       status: formData.status,
       description: formData.description || null,
       estimated_restoration_at: formData.eta || null,
+      latitude: formData.latitude,  
+      longitude: formData.longitude, 
       updated_at: new Date().toISOString() // Manually set updated_at
   };
 
-  console.log('Updating announcements:', announcementData);
+  console.log('Updating announcements (main data):', announcementData);
 
   try {
+      // 2. Update the main announcement details
       const { data, error } = await supabase
           .from('announcements')
           .update(announcementData)
@@ -705,14 +862,64 @@ async function handleOutagesUpdate(outageIds, formData, feederId) {
           throw error;
       }
       
-      console.log('Supabase update success:', data);
+      console.log('Supabase announcement update success:', data);
+      
+      // --- NEW LOGIC: Sync announcement_images ---
+      
+      // 3. Delete all old images for these announcements
+      // This ensures removed images are gone
+      const { error: deleteError } = await supabase
+          .from('announcement_images')
+          .delete()
+          .in('announcement_id', outageIds);
+      
+      if (deleteError) {
+          console.error('Error clearing old announcement images:', deleteError);
+          // Don't throw, just warn. Proceed to insert new ones.
+      }
+
+      // 4. Prepare new image rows to insert
+      // formData.imageUrls contains the *complete* list of images
+      if (formData.imageUrls && formData.imageUrls.length > 0) {
+          const imageInserts = [];
+          for (const id of outageIds) { // Loop over each announcement being updated
+              for (const url of formData.imageUrls) { // Add all images for it
+                  imageInserts.push({
+                      announcement_id: id,
+                      image_url: url
+                  });
+              }
+          }
+
+          // 5. Insert all new images in one batch
+          if (imageInserts.length > 0) {
+              const { error: insertError } = await supabase
+                  .from('announcement_images')
+                  .insert(imageInserts);
+              
+              if (insertError) {
+                  console.error('Error inserting new announcement images:', insertError);
+                  // Log and show a partial success
+                  window.showErrorPopup("Outage updated, but failed to save images.");
+              }
+          }
+      }
+      // --- END NEW LOGIC ---
+      // =================================================================
+      // ✅ END MODIFICATION 3
+      // =================================================================
+
       window.showSuccessPopup("Outage updated successfully!");
 
-      // Refresh view if applyFiltersAndRender function exists (e.g., on outages.js)
+      // Refresh outages list UI
       if (typeof window.applyFiltersAndRender === 'function') {
           window.applyFiltersAndRender();
       }
 
+      // ✅ Also refresh MAP if present
+      if (typeof window.loadAnnouncementsToMap === "function") {
+          window.loadAnnouncementsToMap();
+      }
   } catch (error) {
       console.error('Error updating announcement:', error.message);
       window.showErrorPopup(`Error updating announcement: ${error.message}`);
@@ -722,7 +929,7 @@ async function handleOutagesUpdate(outageIds, formData, feederId) {
 // --- MAIN SCRIPT LOGIC ---
 
 document.addEventListener("DOMContentLoaded", () => {
-  console.log("shared.js v6 (Merged): DOMContentLoaded");
+  console.log("shared.js v7 (Schema Update): DOMContentLoaded");
 
   // --- Universal Filter Callback (from sharedog.js) ---
   const callPageFilter = () => {
@@ -803,42 +1010,59 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // --- Feeder Filter UI Logic (from sharedog.js) ---
-  const feederBtn = document.getElementById("feederFilterBtn");
-  const feederPopup = document.getElementById("feederPopup");
-  if (feederBtn && feederPopup) {
-      window.setupDropdownToggle("feederFilterBtn", "feederPopup");
-      const feederToggles = feederPopup.querySelectorAll(".feeder-toggle");
-      const feederClearAll = document.getElementById("feederClearAll");
-      const feederSelectAll = document.getElementById("feederSelectAll");
+const feederBtn = document.getElementById("feederFilterBtn");
+const feederPopup = document.getElementById("feederPopup");
 
-      const setTogglesState = (select) => {
-          feederToggles.forEach((btn) => {
-              if (select) { 
-                btn.classList.add("bg-blue-500", "text-white"); 
-                btn.classList.remove("bg-gray-200", "dark:bg-gray-700"); 
-              } else { 
-                btn.classList.remove("bg-blue-500", "text-white"); 
-                btn.classList.add("bg-gray-200", "dark:bg-gray-700"); 
-              }
-          });
-          callPageFilter();
-      };
+if (feederBtn && feederPopup) {
+    // This part is correct and handles opening/closing
+    window.setupDropdownToggle("feederFilterBtn", "feederPopup");
 
-      feederToggles.forEach((btn) => {
-          btn.addEventListener("click", () => {
-              btn.classList.toggle("bg-blue-500"); 
-              btn.classList.toggle("text-white");
-              btn.classList.toggle("bg-gray-200"); 
-              btn.classList.toggle("dark:bg-gray-700");
-              callPageFilter();
-          });
-      });
+    const feederClearAll = document.getElementById("feederClearAll");
+    const feederSelectAll = document.getElementById("feederSelectAll");
 
-      feederClearAll?.addEventListener("click", () => setTogglesState(false));
-      feederSelectAll?.addEventListener("click", () => setTogglesState(true));
-  }
+    /**
+     * Helper function to set the visual state of all buttons.
+     * This function now queries for the buttons *every time it runs*,
+     * so it works on the currently visible buttons.
+     */
+    const setTogglesState = (select) => {
+        // Find the buttons *now*, not on page load
+        const feederToggles = feederPopup.querySelectorAll(".feeder-toggle");
+        
+        feederToggles.forEach((btn) => {
+            if (select) {
+                btn.classList.add("bg-blue-500", "text-white");
+                btn.classList.remove("bg-gray-200", "dark:bg-gray-700");
+            } else {
+                btn.classList.remove("bg-blue-500", "text-white");
+                btn.classList.add("bg-gray-200", "dark:bg-gray-700");
+            }
+        });
+        callPageFilter(); // Call the page-specific filter function
+    };
 
-  // --- Search Input Logic (from sharedog.js) ---
+    // --- NEW: Event Delegation ---
+    // Listen for all clicks on the popup container
+    feederPopup.addEventListener("click", (e) => {
+        
+        // Check if the clicked item (e.target) is a feeder-toggle button
+        if (e.target.classList.contains("feeder-toggle")) {
+            // It is! Toggle its classes.
+            e.target.classList.toggle("bg-blue-500");
+            e.target.classList.toggle("text-white");
+            e.target.classList.toggle("bg-gray-200");
+            e.target.classList.toggle("dark:bg-gray-700");
+            callPageFilter(); // Call the page-specific filter function
+        }
+    });
+
+    // These buttons exist on page load, so their listeners are fine.
+    // They will now work because setTogglesState() finds buttons dynamically.
+    feederClearAll?.addEventListener("click", () => setTogglesState(false));
+    feederSelectAll?.addEventListener("click", () => setTogglesState(true));
+}
+
+ // --- Search Input Logic (from sharedog.js) ---
   const searchInput = document.getElementById("locationSearch");
   if (searchInput) {
       let debounceTimer;
@@ -994,4 +1218,3 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
 }); // End DOMContentLoaded
-

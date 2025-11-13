@@ -62,33 +62,38 @@ document.addEventListener("DOMContentLoaded", () => {
     // ===================================
     // 1. MAP INITIALIZATION
     // ===================================
+
+    // Para di overlap markers with same coordinates
+    function jitterCoordinate(value) {
+        const offset = (Math.random() - 0.5) * 0.0005; 
+        // adjust 0.0005 if too near/far (0.0003 = closer, 0.001 = farther)
+        return value + offset;
+    }
+
     function initMap() {
         map = L.map('map').setView([16.4142, 120.5950], 13);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
-        
-        // --- Connect to shared.js functions ---
+
         window.filterMarkers = loadOutageMarkers; 
         window.applyFilters = applyMapFilters; 
         
-        // --- Page-specific listeners ---
         setupMapSearchEnterKey();
         
-        // Add one listener to the map container for popup buttons
+        // Listener for popup button -> update modal
         mapContainer.addEventListener('click', (e) => {
             const updateBtn = e.target.closest('.update-from-map-btn');
             if (updateBtn) {
                 const id = parseInt(updateBtn.dataset.id);
                 if (!isNaN(id)) {
-                    map.closePopup(); // Close the leaflet popup
+                    map.closePopup();
                     window.showUpdateModal([id], 'outages');
                 }
             }
         });
 
-        // --- Load data ---
         populateFeederFilters();
         loadOutageMarkers(); 
     }
@@ -97,14 +102,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // 2. DATA LOADING & MARKERS
     // ===================================
     
-    /**
-     * Fetches all feeder data from Supabase to populate the filter.
-     */
     async function populateFeederFilters() {
         const container = document.getElementById("feederButtonContainer");
         if (!container) return;
 
-        container.innerHTML = `<span classclass="col-span-3 text-xs text-gray-500">Loading...</span>`;
+        container.innerHTML = `<span class="col-span-3 text-xs text-gray-500">Loading...</span>`;
 
         if (!window.supabase) {
             container.innerHTML = `<span class="col-span-3 text-xs text-red-500">Supabase error.</span>`;
@@ -141,7 +143,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     /**
-     * Fetches and displays outage markers based on the date filter.
+     * ✅ UPDATED: Fetch announcements instead of outages
      */
     async function loadOutageMarkers() {
         if (!window.supabase) {
@@ -149,11 +151,11 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
         
-        // --- 1. Get Date Filter ---
+        // --- Date Filter ---
         const dateInput = document.getElementById("calendarInput");
         const selectedDate = dateInput?.value;
+
         let todayISO, tomorrowISO;
-        
         if (selectedDate) {
             const selectedDay = new Date(selectedDate);
             selectedDay.setHours(0, 0, 0, 0); 
@@ -170,51 +172,60 @@ document.addEventListener("DOMContentLoaded", () => {
             tomorrowISO = tomorrow.toISOString();
         }
 
-        // --- 2. Fetch outages from Supabase ---
+        // DATA filtered from announcement table sa DB
         const { data: outages, error } = await supabase
-            .from('outages')
+            .from('announcements')
             .select('*')
             .not('latitude', 'is', null)
             .not('longitude', 'is', null)
-            .neq('status', 'Completed') // Exclude completed outages
-            .gte('created_at', todayISO)
-            .lt('created_at', tomorrowISO);
+            .in('status', ['Reported', 'Ongoing'])
+            .gte('updated_at', todayISO)   
+            .lt('updated_at', tomorrowISO); 
 
         if (error) {
-            console.error("Error fetching outage markers:", error);
+            console.error("Error fetching announcement markers:", error);
             return;
         }
 
-        // --- 3. Clear previous markers ---
+        // Clear previous markers
         allMarkers.forEach(markerData => markerData.marker.remove());
         allMarkers = [];
 
-        // --- 4. Create new markers ---
+        // ✅ CHANGED FIELD REFERENCES TO MATCH `announcements`
         outages.forEach(outage => {
             const chosenIcon = getIconForStatus(outage.status);
-            const marker = L.marker([outage.latitude, outage.longitude], { icon: chosenIcon });
+            const jitteredLat = jitterCoordinate(outage.latitude);
+            const jitteredLng = jitterCoordinate(outage.longitude);
+
+            const marker = L.marker([jitteredLat, jitteredLng], { icon: chosenIcon });
+
             const popupHTML = createPopupHTML(outage);
             marker.bindPopup(popupHTML);
+
             allMarkers.push({
                 marker: marker,
-                searchableText: (outage.title || '').toLowerCase() + ' ' + (outage.affected_areas || []).join(' ').toLowerCase(),
+                searchableText: 
+                    (outage.location || '').toLowerCase() + ' ' + 
+                    (outage.areas_affected || []).join(' ').toLowerCase(),
                 feeder: outage.feeder_id,
                 status: outage.status 
             });
         });
 
-        // 5. Apply the Feeder and Search filters to the newly loaded markers
         applyMapFilters();
     }
 
     /**
-     * Helper: Creates the HTML for the popup "card"
+     * ✅ UPDATED: Popup now uses announcement fields
      */
     function createPopupHTML(outage) {
-        const eta = outage.eta ? new Date(outage.eta).toLocaleString() : "To be determined";
+        const eta = outage.estimated_restoration_at 
+            ? new Date(outage.estimated_restoration_at).toLocaleString() 
+            : "To be determined";
+
         const statusClass = outage.status === 'Ongoing' ? 'bg-blue-100 text-blue-800'
-                         : outage.status === 'Reported' ? 'bg-red-100 text-red-800'
-                         : 'bg-green-100 text-green-800'; 
+                        : outage.status === 'Reported' ? 'bg-red-100 text-red-800'
+                        : 'bg-green-100 text-green-800'; 
 
         return `
             <div class="w-64 font-display">
@@ -222,12 +233,12 @@ document.addEventListener("DOMContentLoaded", () => {
                     <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${statusClass}">
                         ${outage.status}
                     </span>
-                    <h3 class="font-semibold text-gray-800 dark:text-gray-100 mt-1">${outage.title || 'Outage Report'}</h3>
+                    <h3 class="font-semibold text-gray-800 dark:text-gray-100 mt-1">${outage.location || 'Outage Announcement'}</h3>
                 </div>
                 <div class="p-2 space-y-2 text-gray-700 dark:text-gray-300">
                     <div>
                         <label class="text-xs font-medium text-gray-500 dark:text-gray-400">Affected Areas</label>
-                        <p class="text-sm">${(outage.affected_areas || []).join(", ")}</p>
+                        <p class="text-sm">${(outage.areas_affected || []).join(", ")}</p>
                     </div>
                     <div>
                         <label class="text-xs font-medium text-gray-500 dark:text-gray-400">ETA</label>
@@ -236,7 +247,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 </div>
                 <div class="p-2 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
                     <button type="button" class="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-full hover:bg-blue-700 transition w-full update-from-map-btn" data-id="${outage.id}">
-                        Update / Announce
+                        Update Announcement
                     </button>
                 </div>
             </div>
@@ -246,15 +257,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // ===================================
     // 3. FILTERING & SEARCH LOGIC (Map-Specific)
     // ===================================
-
-    /**
-     * This is the function that shared.js will call via window.applyFilters
-     */
     function applyMapFilters() {
-        if (!feederPopup || !searchInput) {
-             console.warn("Filter elements not found, skipping map filter.");
-             return;
-        }
+        if (!feederPopup || !searchInput) return;
         
         const allFeederToggles = feederPopup.querySelectorAll(".feeder-toggle");
         const selectedFeederToggles = feederPopup.querySelectorAll(".feeder-toggle.bg-blue-500");
@@ -264,45 +268,33 @@ document.addEventListener("DOMContentLoaded", () => {
 
         allMarkers.forEach(markerData => {
             const feederIdString = String(markerData.feeder);
-            
             const isFeederVisible = showAllFeeders || selectedFeeders.includes(feederIdString);
             const isSearchMatch = searchTerm === '' || markerData.searchableText.includes(searchTerm);
             const isVisible = isFeederVisible && isSearchMatch;
 
             if (isVisible) {
-                if (!map.hasLayer(markerData.marker)) {
-                    markerData.marker.addTo(map);
-                }
+                if (!map.hasLayer(markerData.marker)) markerData.marker.addTo(map);
             } else {
-                if (map.hasLayer(markerData.marker)) {
-                    markerData.marker.remove();
-                }
+                if (map.hasLayer(markerData.marker)) markerData.marker.remove();
             }
         });
     }
 
-    /**
-     * Listener for Enter key (Jump to location) - This is MAP-SPECIFIC
-     */
     function setupMapSearchEnterKey() {
-        // The 'input' listener is in shared.js
-        
         searchInput.addEventListener("keypress", (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault(); 
-                
                 const searchTerm = searchInput.value.toLowerCase();
+
                 const matchingMarker = allMarkers.find(markerData => 
                     markerData.searchableText.includes(searchTerm) && map.hasLayer(markerData.marker)
                 );
                 
                 if (matchingMarker) {
-                    map.flyTo(matchingMarker.marker.getLatLng(), 15); // Zoom and pan
-                    matchingMarker.marker.openPopup(); // Open the popup
-                } else {
-                    if (window.showSuccessPopup) {
-                        window.showSuccessPopup("No matching outage found in current view."); 
-                    }
+                    map.flyTo(matchingMarker.marker.getLatLng(), 15);
+                    matchingMarker.marker.openPopup();
+                } else if (window.showSuccessPopup) {
+                    window.showSuccessPopup("No matching outage found in current view.");
                 }
             }
         });

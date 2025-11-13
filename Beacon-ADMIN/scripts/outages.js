@@ -1,5 +1,5 @@
 // ==========================
-// OUTAGES PAGE SCRIPT -
+// OUTAGES PAGE SCRIPT (v7 - Schema Update)
 // ==========================
 // Loaded LAST only on outages.html
 
@@ -10,11 +10,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const emptyState = document.getElementById("emptyState");
 
     if (!outagesContainer) {
-        console.error("CRITICAL ERROR v4.0: Outages container (#outagesContainer) not found!");
+        console.error("CRITICAL ERROR v4.1: Outages container (#outagesContainer) not found!");
         return;
     }
     if (!emptyState) {
-        console.warn("WARN v4.0: Empty state element (#emptyState) not found.");
+        console.warn("WARN v4.1: Empty state element (#emptyState) not found.");
     }
 
     // --- State Variables ---
@@ -93,14 +93,58 @@ document.addEventListener("DOMContentLoaded", () => {
         emptyState?.classList.add('hidden');
 
         try {
+            // =================================================================
+            // ✅ MODIFICATION: Updated query to fetch from announcement_images
+            // =================================================================
             const { data, error } = await supabase
-                .from('outages')
-                .select('*')
+                .from('announcements')
+                .select(`
+                    *,
+                    title:location,
+                    eta:estimated_restoration_at,
+                    affected_areas:areas_affected,
+                    announcement_images ( id, image_url )
+                `)
                 .order('created_at', { ascending: false });
+            // =================================================================
+            // ✅ END MODIFICATION
+            // =================================================================
 
             if (error) throw error;
 
-            allOutages = data || [];
+            // =================================================================
+            // ✅ MODIFICATION: Map data to create the `images` array
+            // The rest of the script (renderers) expects `outage.images`
+            // to be a simple array of URLs.
+            // =================================================================
+            allOutages = data ? data.map(outage => {
+                // Get URLs from the new related table
+                const newImageUrls = outage.announcement_images 
+                    ? outage.announcement_images.map(img => img.image_url) 
+                    : [];
+                
+                // Fallback for any URLs still in the old 'pictures' or 'picture' columns
+                const oldImageUrls = Array.isArray(outage.pictures) ? outage.pictures : [];
+                const singleImageUrl = outage.picture ? [outage.picture] : [];
+                
+                // Combine all and remove duplicates
+                const allImageUrls = [
+                    ...new Set([
+                        ...newImageUrls, 
+                        ...oldImageUrls, 
+                        ...singleImageUrl
+                    ])
+                ];
+
+                return {
+                    ...outage,
+                    images: allImageUrls // This `images` property is used by render functions
+                };
+            }) : [];
+            // =================================================================
+            // ✅ END MODIFICATION
+            // =================================================================
+
 
         } catch (error) {
             console.error("Error fetching outages:", error.message);
@@ -151,11 +195,15 @@ document.addEventListener("DOMContentLoaded", () => {
             const feederIdString = String(outage.feeder_id);
             const feederMatch = showAllFeeders || selectedFeeders.includes(feederIdString);
             const statusMatch = (selectedStatus === 'all') || (outage.status === selectedStatus);
+            
+            // 'outage.title' is now correctly mapped from the 'location' column
+            // 'outage.affected_areas' is now correctly mapped from the 'areas_affected' column
             const searchableText = [
-                outage.title || '',
+                outage.title || '', // This is now outage.location
                 outage.description || '',
-                ...(outage.affected_areas || [])
+                ...(outage.affected_areas || []) // This is now outage.areas_affected
             ].join(' ').toLowerCase();
+            
             const searchMatch = (searchTerm === '') || searchableText.includes(searchTerm);
             return feederMatch && statusMatch && searchMatch;
         });
@@ -196,46 +244,85 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
+
     function renderSinglePostCard(outage) {
         if (typeof outage !== 'object' || outage === null) { outage = {}; }
         const status = outage.status || 'Unknown';
         const statusConfig = STATUS_COLORS[status] || STATUS_COLORS.Default;
+
         const eta = outage.eta ? new Date(outage.eta).toLocaleString() : "To be determined";
         const createdDate = outage.created_at ? new Date(outage.created_at).toLocaleString() : "N/A";
         const hasCoords = outage.latitude && outage.longitude;
         const coordsText = hasCoords ? `${Number(outage.latitude).toFixed(4)}, ${Number(outage.longitude).toFixed(4)}` : 'N/A';
-        const hasImages = Array.isArray(outage.images) && outage.images.length > 0;
-        const affectedAreasText = Array.isArray(outage.affected_areas) ? outage.affected_areas.join(", ") : 'N/A';
         const outageType = outage.type === 'scheduled' ? 'Scheduled' : 'Unscheduled';
 
+        // Handle images dynamically: show full image without cropping
+        // This code works AS-IS because `fetchAllOutages` now correctly
+        // populates `outage.images` as an array of URLs.
+        const hasImages = Array.isArray(outage.images) && outage.images.length > 0;
+        const imageHTML = hasImages ? `
+            <div class="w-full mb-4">
+                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Pictures</label>
+                <div class="w-full overflow-hidden rounded-md">
+                    ${outage.images.map((img, idx) => `
+                        <img src="${img || ''}" alt="Outage image ${idx+1}" 
+                            class="w-full h-auto rounded-md mb-2">
+                    `).join('')}
+                </div>
+            </div>
+        ` : '';
+
+        // Show only the first affected area
+        let affectedAreaText = 'N/A';
+        if (Array.isArray(outage.affected_areas) && outage.affected_areas.length > 0) {
+            affectedAreaText = outage.affected_areas[0];
+            if (outage.affected_areas.length > 1) {
+                affectedAreaText += ` (+${outage.affected_areas.length - 1} more)`;
+            }
+        }
+
         return `
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden border-t-4 ${statusConfig.border || 'border-gray-500'}">
-          <div class="p-4 border-b dark:border-gray-700">
-            <div class="flex justify-between items-center gap-4 flex-wrap">
-              <h3 class="text-xl font-semibold text-gray-900 dark:text-white">${outage.title || 'Outage Report'}</h3>
-              <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${statusConfig.tag || ''} flex-shrink-0">${status || 'Unknown'}</span>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border-t-4 ${statusConfig.border} w-[650px] mx-auto mb-6 p-4 flex flex-col">
+            <div class="flex justify-between items-center flex-wrap gap-2 mb-2">
+                <h3 class="text-xl font-semibold text-gray-900 dark:text-white">
+                    ${outage.cause ? outage.cause : 'Outage Report'}${outage.location ? ` at ${outage.location}` : ''}
+                </h3>
+                <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${statusConfig.tag} flex-shrink-0">${status}</span>
             </div>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Feeder ${outage.feeder_id || 'N/A'} | ${outageType}</p>
-          </div>
-          <div class="p-4 space-y-4">
-            <p class="text-gray-700 dark:text-gray-300">${outage.description || 'No description provided.'}</p>
-            ${hasImages ? `<div><label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Pictures</label><div class="flex flex-wrap gap-2">${outage.images.map(img => `<img src="${img || ''}" alt="Outage image" class="w-24 h-24 object-cover rounded-md cursor-pointer hover:opacity-75 view-images-btn" data-src="${img || ''}">`).join('')}</div></div>` : ''}
+            <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">Feeder ${outage.feeder_id || 'N/A'} | ${outageType}</p>
+            
+            <p class="text-gray-700 dark:text-gray-300 mb-4">${outage.description || 'No description provided.'}</p>
+
+            ${imageHTML}
+
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t dark:border-gray-700">
-              <div><label class="block text-xs font-medium text-gray-500 dark:text-gray-400">Affected Areas</label><p class="text-sm text-gray-800 dark:text-gray-200">${affectedAreasText || 'N/A'}</p></div>
-              <div><label class="block text-xs font-medium text-gray-500 dark:text-gray-400">ETA</label><p class="text-sm font-bold text-blue-600 dark:text-blue-400">${eta}</p></div>
-              <div><label class="block text-xs font-medium text-gray-500 dark:text-gray-400">Coordinates</label>${hasCoords ? `<div class="flex items-center space-x-1"><span class="text-sm text-gray-800 dark:text-gray-200">${coordsText}</span><button type="button" class="text-blue-600 dark:text-blue-400 hover:underline copy-coords-btn" data-coords="${coordsText}"><span class="material-icons text-sm">content_copy</span></button></div>` : '<p class="text-sm text-gray-500 dark:text-gray-400">N/A</p>'}</div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400">Affected Area</label>
+                    <p class="text-sm text-gray-800 dark:text-gray-200">${affectedAreaText}</p>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400">ETA</label>
+                    <p class="text-sm font-bold text-blue-600 dark:text-blue-400">${eta}</p>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400">Coordinates</label>
+                    ${hasCoords ? `<div class="flex items-center space-x-1">
+                        <span class="text-sm text-gray-800 dark:text-gray-200">${coordsText}</span>
+                        <button type="button" class="text-blue-600 dark:text-blue-400 hover:underline copy-coords-btn" data-coords="${coordsText}">
+                            <span class="material-icons text-sm">content_copy</span>
+                        </button>
+                    </div>` : '<p class="text-sm text-gray-500 dark:text-gray-400">N/A</p>'}
+                </div>
             </div>
-          </div>
-          <div class="px-4 py-3 bg-gray-50 dark:bg-gray-700/50 flex justify-between items-center flex-wrap gap-2">
-            <span class="text-xs text-gray-500 dark:text-gray-400">Reported: ${createdDate}</span>
-            <div class="flex space-x-2">
-              <button type="button" class="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-100 rounded-full hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-300 dark:hover:bg-blue-800 transition view-details-btn" data-id="${outage.id || ''}">Details</button>
-              <button type="button" class="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-full hover:bg-blue-700 transition update-item-btn" data-id="${outage.id || ''}">Update</button>
+
+            <div class="flex justify-end space-x-2 mt-4">
+                <button type="button" class="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-100 rounded-full hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-300 dark:hover:bg-blue-800 transition view-details-btn" data-id="${outage.id || ''}">Details</button>
+                <button type="button" class="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-full hover:bg-blue-700 transition update-item-btn" data-id="${outage.id || ''}">Update</button>
             </div>
-          </div>
         </div>
         `;
     }
+
 
     // ===================================
     // MODALS & ACTIONS (Updated for Unified Modal System)
@@ -247,12 +334,26 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!btn) return;
         const coords = btn.dataset.coords;
         if (!coords || coords === 'N/A') return;
-        navigator.clipboard.writeText(coords).then(() => {
+
+        // Use document.execCommand for simple clipboard access in iFrames
+        try {
+            const tempInput = document.createElement("textarea");
+            tempInput.style.position = "absolute";
+            tempInput.style.left = "-9999px";
+            tempInput.value = coords;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand("copy");
+            document.body.removeChild(tempInput);
+            
             window.showSuccessPopup("Coordinates Copied!");
             const originalHTML = btn.innerHTML;
             btn.innerHTML = '<span class="material-icons text-sm text-green-600">check</span>';
             setTimeout(() => { if (btn && btn.parentNode) btn.innerHTML = originalHTML; }, 2000);
-        }).catch(err => console.error('Failed to copy coordinates:', err));
+        } catch (err) {
+            console.error('Failed to copy coordinates:', err);
+            window.showErrorPopup("Failed to copy. See console.");
+        }
     }
 
     function hasCoords(outage) { 
@@ -297,71 +398,129 @@ document.addEventListener("DOMContentLoaded", () => {
                 showIndividualDetails(id);
             } else if (btn.classList.contains('update-item-btn')) {
                 // Use unified modal system
+                // This is consistent with shared.js
                 window.showUpdateModal([id], 'outages');
             }
         });
     }
-
-    // --- Show Details Modal ---
-    function showIndividualDetails(outageId) {
-        const outage = allOutages.find(o => o.id === outageId);
-        if (!outage) { 
-            console.error("Outage not found for ID:", outageId);
-            return; 
-        }
-
-        const coordsText = hasCoords(outage) ? `${outage.latitude.toFixed(4)}, ${outage.longitude.toFixed(4)}` : 'N/A';
-        const statusConfig = STATUS_COLORS[outage.status] || STATUS_COLORS.Default;
-        const eta = outage.eta ? new Date(outage.eta).toLocaleString() : "To be determined";
-        const createdDate = outage.created_at ? new Date(outage.created_at).toLocaleString() : 'N/A';
-        const modal = document.createElement('div');
-        modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
-        modal.innerHTML = `
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-              <div class="flex justify-between items-center p-6 border-b dark:border-gray-700">
-                <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Outage Details #${outage.id}</h3>
-                <button type="button" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 close-modal"><span class="material-icons">close</span></button>
-              </div>
-              <div class="p-6 space-y-4 overflow-y-auto">
-                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                   <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Title</label><p class="text-lg text-gray-900 dark:text-white">${outage.title || 'N/A'}</p></div>
-                   <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label><span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium ${statusConfig.tag || ''}">${outage.status || 'N/A'}</span></div>
-                   <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Feeder</label><p class="text-lg text-gray-900 dark:text-white">Feeder ${outage.feeder_id || 'N/A'}</p></div>
-                   <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Type</label><p class="text-lg text-gray-900 dark:text-white">${outage.type === 'scheduled' ? 'Scheduled' : 'Unscheduled'}</p></div>
-                 </div>
-                 <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label><p class="text-gray-900 dark:text-white mt-1">${outage.description || 'No description provided'}</p></div>
-                 <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Affected Areas</label><p class="text-gray-900 dark:text-white mt-1">${(Array.isArray(outage.affected_areas) ? outage.affected_areas.join(", ") : 'N/A') || 'N/A'}</p></div>
-                 <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">ETA</label><p class="text-lg font-bold text-blue-600 dark:text-blue-400">${eta}</p></div>
-                 <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Images</label>${(Array.isArray(outage.images) && outage.images.length > 0) ? `<div class="grid grid-cols-3 gap-2 mt-2">${outage.images.map(img => `<img src="${img}" alt="Report image" class="w-full h-24 object-cover rounded cursor-pointer hover:opacity-75 view-popup-image">`).join('')}</div>` : '<p class="text-gray-500 dark:text-gray-400 mt-1">No images submitted</p>'}</div>
-                 <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Coordinates</label>${hasCoords(outage) ? `<div class="flex items-center space-x-2 mt-1"><span class="text-gray-900 dark:text-white">${coordsText}</span><button type="button" class="text-blue-600 dark:text-blue-400 hover:underline copy-coords-btn" data-coords="${coordsText}"><span class="material-icons text-sm">content_copy</span></button></div>` : '<p class="text-gray-500 dark:text-gray-400 mt-1">No coordinates submitted</p>'}</div>
-                 <div><label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Reported At</label><p class="text-gray-900 dark:text-white">${createdDate}</p></div>
-              </div>
-              <div class="flex justify-end space-x-3 p-6 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-                <button type="button" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition close-modal">Close</button>
-                <button type="button" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition update-from-details" data-id="${outage.id}">Update</button>
-              </div>
-            </div>
-          `;
-        document.body.appendChild(modal);
-        
-        modal.querySelectorAll('.close-modal').forEach(btn => 
-            btn.addEventListener('click', () => modal.remove())
-        );
-        
-        modal.querySelector('.update-from-details').addEventListener('click', function() {
-            modal.remove();
-            // Use unified modal system
-            window.showUpdateModal([outageId], 'outages');
-        });
-        
-        modal.querySelectorAll('.copy-coords-btn').forEach(btn => 
-            btn.addEventListener('click', handleCopyCoords)
-        );
-        
-        modal.querySelectorAll('.view-popup-image').forEach(img => 
-            img.addEventListener('click', () => showImageModal(img.src))
-        );
+// --- Show Details Modal ---
+function showIndividualDetails(outageId) {
+    // This function works AS-IS because `fetchAllOutages`
+    // correctly populates `allOutages` with the `images` array.
+    const outage = allOutages.find(o => o.id === outageId);
+    if (!outage) {
+        console.error("Outage not found for ID:", outageId);
+        return;
     }
+
+    const coordsText = hasCoords(outage) ? `${outage.latitude.toFixed(4)}, ${outage.longitude.toFixed(4)}` : 'N/A';
+    const statusConfig = STATUS_COLORS[outage.status] || STATUS_COLORS.Default;
+
+    const eta = outage.eta ? new Date(outage.eta).toLocaleString() : "To be determined";
+    const createdDate = outage.created_at ? new Date(outage.created_at).toLocaleString() : 'N/A';
+
+    const hasImages = Array.isArray(outage.images) && outage.images.length > 0;
+
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+    modal.innerHTML = `
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+          <div class="w-full h-2 ${statusConfig.border}"></div>
+
+          <div class="flex justify-between items-start p-6 border-b dark:border-gray-700">
+            <div>
+              <h3 class="text-xl font-semibold text-gray-900 dark:text-white">${outage.cause || 'Outage'}${outage.location ? ' at ' + outage.location : ''}</h3>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Reported At: ${createdDate}</p>
+            </div>
+            <button type="button" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 close-modal">
+              <span class="material-icons">close</span>
+            </button>
+          </div>
+
+          <div class="p-6 space-y-4 overflow-y-auto">
+            ${hasImages ? `
+            <div class="w-full flex justify-center bg-white dark:bg-gray-800 rounded-lg p-4 shadow mb-4">
+              <div class="relative w-full max-w-2xl h-64 md:h-96 overflow-hidden rounded-lg">
+                ${outage.images.map((img, idx) => `
+                  <img src="${img}" alt="Outage image ${idx+1}" class="absolute top-0 left-0 w-full h-full object-contain transition-opacity duration-500 ${idx === 0 ? 'opacity-100' : 'opacity-0'} carousel-image" data-index="${idx}">
+                `).join('')}
+                <button type="button" class="absolute top-1/2 left-2 -translate-y-1/2 bg-gray-200 dark:bg-gray-700 bg-opacity-50 rounded-full px-2 py-1 carousel-prev">
+                  <span class="material-icons text-sm">chevron_left</span>
+                </button>
+                <button type="button" class="absolute top-1/2 right-2 -translate-y-1/2 bg-gray-200 dark:bg-gray-700 bg-opacity-50 rounded-full px-2 py-1 carousel-next">
+                  <span class="material-icons text-sm">chevron_right</span>
+                </button>
+              </div>
+            </div>` : ''}
+
+            <div class="grid grid-cols-3 gap-4 text-sm font-medium">
+              <div>Status: <span class="${statusConfig.tag} px-2 py-0.5 rounded">${outage.status || 'N/A'}</span></div>
+              <div>Feeder: ${outage.feeder_id || 'N/A'}</div>
+              <div>Type: ${outage.type === 'scheduled' ? 'Scheduled' : 'Unscheduled'}</div>
+            </div>
+
+            <div class="bg-gray-100 dark:bg-gray-700 p-4 rounded-xl">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
+              <p class="text-gray-900 dark:text-white">${outage.description || 'No description provided.'}</p>
+            </div>
+
+            <div class="flex items-center gap-2 text-sm font-medium cursor-pointer affected-areas-toggle">
+              <span class="text-gray-900 dark:text-white">Affected Areas</span>
+              <span class="material-icons text-base transition-transform duration-200">expand_more</span>
+            </div>
+            <div class="mt-2 flex flex-wrap gap-2 affected-areas-content hidden"></div>
+
+            <div class="grid grid-cols-2 gap-4 text-sm font-medium mt-4">
+              <div>ETA: ${eta}</div>
+              <div>Coordinates: ${coordsText}</div>
+            </div>
+          </div>
+
+          <div class="flex justify-end space-x-3 p-6 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+            <button type="button" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition close-modal">Close</Same</button>
+            <button type="button" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition update-from-details" data-id="${outage.id}">Update</button>
+          </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    // CLOSE MODAL
+    modal.querySelectorAll('.close-modal').forEach(btn =>
+        btn.addEventListener('click', () => modal.remove())
+    );
+
+    // UPDATE BUTTON
+    modal.querySelector('.update-from-details').addEventListener('click', function () {
+        modal.remove();
+        // This correctly calls the unified modal from shared.js
+        window.showUpdateModal([outageId], 'outages');
+    });
+
+    // AFFECTED AREAS DROPDOWN LOGIC
+    const toggle = modal.querySelector('.affected-areas-toggle');
+    const content = modal.querySelector('.affected-areas-content');
+    const arrowIcon = toggle.querySelector('.material-icons');
+    let isOpen = false;
+
+    toggle.addEventListener('click', () => {
+        if (!isOpen) {
+            content.innerHTML = (Array.isArray(outage.affected_areas) ? outage.affected_areas : []).map(area => `
+                <span class="inline-block bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-white rounded-full px-3 py-1 text-xs">${area}</span>
+            `).join('');
+            content.classList.remove('hidden');
+            arrowIcon.classList.add('rotate-180');
+        } else {
+            content.classList.add('hidden');
+            arrowIcon.classList.remove('rotate-180');
+        }
+        isOpen = !isOpen;
+    });
+
+    // IMAGE CAROUSEL POPUP
+    modal.querySelectorAll('.view-popup-image').forEach(img =>
+        img.addEventListener('click', () => showImageModal(img.src))
+    );
+}
 
     // --- Start ---
     init();
