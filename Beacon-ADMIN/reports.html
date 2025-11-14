@@ -114,9 +114,15 @@
           <div id="reportsContainer" class="hidden mt-8">
             <div class="flex justify-between items-center mb-4">
               <h3 id="reportsTitle" class="text-xl font-bold text-gray-800 dark:text-white">Outage Reports</h3>
-              <button id="backBtn" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition">
-                ← Back
-              </button>
+              
+              <div class="flex space-x-2">
+                <button id="createAnnouncementBtn" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition flex items-center shadow-sm">
+                  <span class="material-icons mr-1">add</span> New Announcement
+                </button>
+                <button id="backBtn" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition shadow-sm flex items-center">
+                  <span class="material-icons mr-1">arrow_back</span> Back
+                </button>
+              </div>
             </div>
             
             <div class="bg-white dark:bg-gray-800 p-4 rounded-t-lg border-b dark:border-gray-700 flex flex-wrap justify-end items-center gap-4">

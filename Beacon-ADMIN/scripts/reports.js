@@ -3,7 +3,7 @@
 // ==========================
 
 document.addEventListener("DOMContentLoaded", () => {
-  console.log("Reports Page Script (V9) Loaded.");
+  console.log("Reports Page Script (V12 - Fixed Manual Flag) Loaded.");
 
   // --- App State ---
   let allReports = []; // Will hold all reports from Supabase
@@ -23,6 +23,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const reportsThead = document.getElementById("reportsThead");
   const reportsTitle = document.getElementById("reportsTitle");
   const backBtn = document.getElementById("backBtn");
+  const createAnnouncementBtn = document.getElementById("createAnnouncementBtn"); // NEW: Plus Button
   const bulkUpdateBtn = document.getElementById("bulkUpdateBtn");
 
   const statusFilterEl = document.getElementById('statusFilter');
@@ -868,6 +869,17 @@ document.addEventListener("DOMContentLoaded", () => {
     backBtn.addEventListener("click", () => {
       if (currentView === 'individuals') showBarangayView(currentFeederId);
       else if (currentView === 'barangays') showFeederTilesView();
+    });
+
+    // --- NEW EVENT LISTENER FOR ANNOUNCEMENT BUTTON ---
+    // Opens the unified modal without selecting specific reports (empty array)
+    createAnnouncementBtn.addEventListener("click", () => {
+      window.showUpdateModal([], 'reports', {
+          currentView: currentView,
+          currentFeederId: currentFeederId,
+          currentBarangay: currentBarangay,
+          manualCreation: true // ✅ FIXED: This flag was missing, preventing the modal from opening
+      });
     });
 
     // Updated bulk update to use unified modal system

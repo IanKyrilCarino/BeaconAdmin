@@ -1,5 +1,5 @@
 // ==========================
-// SHARED SCRIPT (v7 - Schema Update)
+// SHARED SCRIPT (v10 - Manual Announcement & Scheduled Date Fix)
 // (Contains universal utilities, UI logic, unified modals, and all page/filter event listeners)
 // ==========================
 // Loaded SECOND on every page
@@ -92,13 +92,18 @@ document.addEventListener("click", (e) => {
  * Unified function to show update modal for both Reports and Outages
  * @param {Array} itemIds - Array of item IDs to update
  * @param {string} context - 'reports' or 'outages'
- * @param {Object} options - Additional options like currentFeederId, currentBarangay
+ * @param {Object} options - Additional options like currentFeederId, currentBarangay, manualCreation
  */
 window.showUpdateModal = async function(itemIds, context, options = {}) {
-if (!Array.isArray(itemIds) || itemIds.length === 0) {
+  
+// =================================================================
+// ✅ FIX 1: Allow empty array IF manualCreation is true
+// =================================================================
+if ((!Array.isArray(itemIds) || itemIds.length === 0) && !options.manualCreation) {
   console.error('No item IDs provided to showUpdateModal');
   return;
 }
+// =================================================================
 
 const isBulk = itemIds.length > 1;
 const dispatchTeams = [
@@ -157,48 +162,45 @@ try {
     return;
   }
 
-  // =================================================================
-  // ✅ MODIFICATION 1: Fetch related images from announcement_images
-  // =================================================================
-  const { data, error } = await supabase
-    .from('announcements')
-    .select('*, announcement_images ( id, image_url )') // Fetch related images
-    .in('id', itemIds);
+  // Only fetch if we actually have IDs (skip for manual creation)
+  if (itemIds.length > 0) {
+      const { data, error } = await supabase
+        .from('announcements')
+        .select('*, announcement_images ( id, image_url )') 
+        .in('id', itemIds);
 
-  if (error) {
-    console.error("Failed to load announcement data:", error);
-    window.showErrorPopup("Failed to load outage details.");
-    return;
+      if (error) {
+        console.error("Failed to load announcement data:", error);
+        window.showErrorPopup("Failed to load outage details.");
+        return;
+      }
+
+      // Map data to create the `images` array the modal expects
+      itemsData = data.map(item => {
+        // Get URLs from the new related table
+        const newImageUrls = item.announcement_images 
+          ? item.announcement_images.map(img => img.image_url) 
+          : [];
+        
+        // Fallback for any URLs still in the old 'pictures' or 'picture' columns
+        const oldImageUrls = Array.isArray(item.pictures) ? item.pictures : [];
+        const singleImageUrl = item.picture ? [item.picture] : [];
+        
+        // Combine all and remove duplicates
+        const allImageUrls = [
+          ...new Set([
+            ...newImageUrls, 
+            ...oldImageUrls, 
+            ...singleImageUrl
+          ])
+        ];
+
+        return {
+          ...item,
+          images: allImageUrls // This `images` property is used by the preview logic
+        };
+      });
   }
-
-  // Map data to create the `images` array the modal expects
-  itemsData = data.map(item => {
-    // Get URLs from the new related table
-    const newImageUrls = item.announcement_images 
-      ? item.announcement_images.map(img => img.image_url) 
-      : [];
-    
-    // Fallback for any URLs still in the old 'pictures' or 'picture' columns
-    const oldImageUrls = Array.isArray(item.pictures) ? item.pictures : [];
-    const singleImageUrl = item.picture ? [item.picture] : [];
-    
-    // Combine all and remove duplicates
-    const allImageUrls = [
-      ...new Set([
-        ...newImageUrls, 
-        ...oldImageUrls, 
-        ...singleImageUrl
-      ])
-    ];
-
-    return {
-      ...item,
-      images: allImageUrls // This `images` property is used by the preview logic
-    };
-  });
-  // =================================================================
-  // ✅ END MODIFICATION 1
-  // =================================================================
 
   allAssociatedIds = itemIds;
 
@@ -211,8 +213,10 @@ try {
 }
 
 
-  // If no items found, show error and return
-  if (itemsData.length === 0 && allAssociatedIds.length === 0) {
+  // =================================================================
+  // ✅ FIX 2: Skip "No data found" check if manualCreation
+  // =================================================================
+  if (itemsData.length === 0 && allAssociatedIds.length === 0 && !options.manualCreation) {
     console.warn('No data found for the provided IDs');
     window.showErrorPopup('No data found for the selected items');
     return;
@@ -318,8 +322,6 @@ try {
   let areaInfoHTML = '';
 
   if (allBarangaysInFeeder.length > 0) {
-
-    // ✅ Put this back — this was missing
     areaInfoHTML = `Feeder ${feederId || 'N/A'} - ${allBarangaysInFeeder.length} barangays`;
 
     areaButtonsHTML = allBarangaysInFeeder.map(barangay => {
@@ -379,17 +381,24 @@ try {
         <div>
           <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Outage Type</label>
           <div class="flex space-x-4">
-            <label class="inline-flex items-center">
+            <label class="inline-flex items-center cursor-pointer">
               <input type="radio" name="outageType" value="scheduled" class="form-radio text-blue-600" 
                       ${initialData.type === 'scheduled' ? 'checked' : ''}>
               <span class="ml-2 text-gray-700 dark:text-gray-300">Scheduled</span>
             </label>
-            <label class="inline-flex items-center">
+            <label class="inline-flex items-center cursor-pointer">
               <input type="radio" name="outageType" value="unscheduled" class="form-radio text-blue-600" 
                       ${initialData.type !== 'scheduled' ? 'checked' : true}>
               <span class="ml-2 text-gray-700 dark:text-gray-300">Unscheduled</span>
             </label>
           </div>
+        </div>
+
+        <div id="scheduledDateContainer" class="hidden transition-all duration-300">
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Scheduled Date & Time</label>
+          <input type="datetime-local" id="scheduledAtInput" 
+                class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700"
+                value="${initialData.scheduled_at ? new Date(initialData.scheduled_at).toISOString().slice(0, 16) : ''}">
         </div>
         
         <div>
@@ -462,7 +471,7 @@ try {
         <div>
           <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Estimated Time of Restoration (ETA)</label>
           <input type="datetime-local" id="modalEta" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700" 
-                  value="${initialData.eta ? new Date(initialData.eta).toISOString().slice(0, 16) : ''}">
+                  value="${initialData.estimated_restoration_at ? new Date(initialData.estimated_restoration_at).toISOString().slice(0, 16) : ''}">
         </div>
 
         <div>
@@ -501,6 +510,27 @@ try {
     btn.addEventListener('click', () => modal.remove())
   );
 
+  // --- NEW: Schedule Date Logic ---
+  const scheduledDateContainer = modal.querySelector('#scheduledDateContainer');
+  const radioButtons = modal.querySelectorAll('input[name="outageType"]');
+
+  // Function to toggle visibility based on selected radio
+  const toggleScheduledInput = () => {
+    const selected = modal.querySelector('input[name="outageType"]:checked').value;
+    if (selected === 'scheduled') {
+      scheduledDateContainer.classList.remove('hidden');
+    } else {
+      scheduledDateContainer.classList.add('hidden');
+    }
+  };
+
+  // Initial check
+  toggleScheduledInput();
+
+  // Add listeners
+  radioButtons.forEach(radio => {
+    radio.addEventListener('change', toggleScheduledInput);
+  });
 
   // Coordinate input toggle
   const enableCoordinates = modal.querySelector('#enableCoordinates');
@@ -670,11 +700,12 @@ try {
           status: modal.querySelector('#statusSelect').value,
           description: modal.querySelector('#modalDescription').value,
           eta: modal.querySelector('#modalEta').value,
+          scheduled_at: modal.querySelector('#scheduledAtInput').value, // ✅ NEW
           // dispatchTeam: modal.querySelector('#dispatchTeamSelect')?.value || null,
           affectedAreas: Array.from(selectedAreas),
           imageUrls: allImageUrls, // This is the *complete* set of URLs
-          latitude,    // ✅ NEW
-          longitude    // ✅ NEW
+          latitude,    
+          longitude    
         };
 
 
@@ -737,6 +768,7 @@ async function handleReportsUpdate(reportIds, formData, feederId) {
     status: formData.status,
     description: formData.description || null,
     estimated_restoration_at: formData.eta || null,
+    scheduled_at: formData.scheduled_at || null, // ✅ NEW: Save scheduled date
     latitude: formData.latitude,
     longitude: formData.longitude,
     // dispatch_team: formData.dispatchTeam !== 'None' ? formData.dispatchTeam : null,
@@ -844,6 +876,7 @@ async function handleOutagesUpdate(outageIds, formData, feederId) {
       status: formData.status,
       description: formData.description || null,
       estimated_restoration_at: formData.eta || null,
+      scheduled_at: formData.scheduled_at || null, // ✅ NEW: Save scheduled date
       latitude: formData.latitude,  
       longitude: formData.longitude, 
       updated_at: new Date().toISOString() // Manually set updated_at
@@ -929,7 +962,7 @@ async function handleOutagesUpdate(outageIds, formData, feederId) {
 // --- MAIN SCRIPT LOGIC ---
 
 document.addEventListener("DOMContentLoaded", () => {
-  console.log("shared.js v7 (Schema Update): DOMContentLoaded");
+  console.log("shared.js v10 (Schema Update): DOMContentLoaded");
 
   // --- Universal Filter Callback (from sharedog.js) ---
   const callPageFilter = () => {
