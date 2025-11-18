@@ -1,780 +1,723 @@
 // ==========================
-// INDEX/DASHBOARD PAGE SCRIPT 
+// DASHBOARD.JS (Updated with Advanced Analytics)
 // ==========================
 
 document.addEventListener("DOMContentLoaded", () => {
+
+    // --- Global Chart Instances ---
+    let feederChartInstance = null;
+    let restorationChartInstance = null;
+    let rootCauseInstance = null;
+    let barangayImpactInstance = null;
+    let peakTimeInstance = null;
+    let mttrTrendInstance = null;
 
     // --- DOM Elements ---
     const pieCanvas = document.getElementById('feederChartCanvas');
     const barCanvas = document.getElementById('restorationChartCanvas');
     const reportsTableBody = document.getElementById('reportsBody');
-    const totalElement = document.getElementById('value-total');
-    const activeElement = document.getElementById('value-active');
-    const completedElement = document.getElementById('value-completed');
+    
+    // Date Filter Elements
+    const dateDropdownBtn = document.getElementById('dateDropdownBtn');
+    const calendarDropdown = document.getElementById('calendarDropdown');
+    const applyDateBtn = document.getElementById('applyDateBtn');
+    const calendarInput = document.getElementById('calendarInput');
+    const selectedDateLabel = document.getElementById('selectedDate');
 
     // ==============================
-    // DASHBOARD.JS
+    // 1. MAP & HEATMAP LOGIC
     // ==============================
-
-    // ---  HEAT MAP ---
-    const map = L.map('map').setView([16.4023, 120.5960], 13); // Center on Baguio
-
+    
+    const map = L.map('map').setView([16.4023, 120.5960], 13); 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors'
+        attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    // --- Heatmap layer ---
     let heatLayer = null;
+    let heatFilter = 'pending'; 
 
-    // --- Current heatmap filter ---
-    // Default to 'all' so any existing points are visible immediately
-    let heatFilter = 'all';
+    const heatFilterLabel = document.querySelector('#heatmapFilterBtn span:nth-child(2)'); 
+    if(heatFilterLabel) heatFilterLabel.textContent = "Pending only";
 
-    // --- Status weight mapping (intensity) ---
-    const STATUS_WEIGHT = {
-    pending: 1,
-    reported: 2,
-    ongoing: 3
-    };
-
-    // --- Fetch reports and update heatmap ---
-    async function fetchReports() {
-    const { data, error } = await supabase
-        .from('reports')
-        .select('latitude, longitude, status');
-
-    if (error) {
-        console.error('Supabase error:', error);
-        return;
-    }
-
-    if (!data || data.length === 0) {
-        console.log('No reports found.');
-        return;
-    }
-
-    // Define allowed statuses based on toggle
-    const allowedStatuses = heatFilter === 'all'
-        ? ['pending', 'reported', 'ongoing']
-        : heatFilter === 'reported_ongoing'
-        ? ['reported', 'ongoing']
-        : ['pending'];
-
-    // Prepare heatmap data
-    const heatData = data
-        .filter(r => r.latitude && r.longitude)
-        .filter(r => allowedStatuses.includes(r.status.toLowerCase()))
-        .map(r => [Number(r.latitude), Number(r.longitude), STATUS_WEIGHT[r.status.toLowerCase()] || 1]);
-
-    // Remove previous layer
-    if (heatLayer) heatLayer.remove();
-
-    // Add new heatmap layer
-    heatLayer = L.heatLayer(heatData, { radius: 25, blur: 15 }).addTo(map);
-    }
-
-    // --- Initial load + periodic refresh ---
-    fetchReports();
-    setInterval(fetchReports, 30000); // refresh every 30s
-
-    // --- Toggle button logic ---
-    const filterBtn = document.getElementById('heatmapFilterBtn');
-    const filterPopup = document.getElementById('heatmapFilterPopup');
-    const filterRadios = filterPopup.querySelectorAll('input[name="heatmapFilter"]');
-
-    // Show/hide popup on button click
-    filterBtn.addEventListener('click', () => {
-    filterPopup.classList.toggle('hidden');
-    });
-
-    // Update heatmap when a filter is selected
-    filterRadios.forEach(radio => {
-    radio.addEventListener('change', e => {
-        heatFilter = e.target.value;
-        
-        // Update button label dynamically
-        const labelText = e.target.nextElementSibling.textContent;
-        const spans = filterBtn.querySelectorAll('span');
-        if (spans.length > 1) spans[1].textContent = labelText;
-
-        fetchReports(); // refresh heatmap
-        filterPopup.classList.add('hidden'); // close popup
-    });
-    });
-
-    // Close popup when clicking outside
-    document.addEventListener('click', e => {
-    if (!filterPopup.contains(e.target) && !filterBtn.contains(e.target)) {
-        filterPopup.classList.add('hidden');
-    }
-    });
-
-
-
-    // ============================================
-    // === DATA LOADING FUNCTIONS (Supabase) ===
-    // ============================================
-
-    /**
-     * Fetches and displays the main dashboard stats (Total, Active, Completed).
-     */
-    async function loadDashboardStats() {
-    if (!window.supabase) return;
-
-    try {
-        const today = new Date();
-        const yesterday = new Date();
-        yesterday.setDate(today.getDate() - 1);
-
-        const formatDate = d => d.toISOString().split('T')[0];
-
-        const todayStart = formatDate(today) + "T00:00:00Z";
-        const todayEnd = formatDate(today) + "T23:59:59Z";
-        const yesterdayStart = formatDate(yesterday) + "T00:00:00Z";
-        const yesterdayEnd = formatDate(yesterday) + "T23:59:59Z";
-
-        // --- Fetch counts ---
-        const counts = {};
-
-        // Total reports
-        const { count: totalToday } = await supabase
-            .from('announcements')
-            .select('id', { count: 'exact', head: true })
-            .gte('created_at', todayStart)
-            .lte('created_at', todayEnd);
-
-        const { count: totalYesterday } = await supabase
-            .from('announcements')
-            .select('id', { count: 'exact', head: true })
-            .gte('created_at', yesterdayStart)
-            .lte('created_at', yesterdayEnd);
-
-        counts.total = { today: totalToday, yesterday: totalYesterday };
-
-        // Active / Ongoing
-        const { count: activeToday } = await supabase
-            .from('announcements')
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'Ongoing')
-            .gte('created_at', todayStart)
-            .lte('created_at', todayEnd);
-
-        const { count: activeYesterday } = await supabase
-            .from('announcements')
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'Ongoing')
-            .gte('created_at', yesterdayStart)
-            .lte('created_at', yesterdayEnd);
-
-        counts.active = { today: activeToday, yesterday: activeYesterday };
-
-        // Completed
-        const { count: completedToday } = await supabase
-            .from('announcements')
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'Completed')
-            .gte('updated_at', todayStart)
-            .lte('updated_at', todayEnd);
-
-        const { count: completedYesterday } = await supabase
-            .from('announcements')
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'Completed')
-            .gte('updated_at', yesterdayStart)
-            .lte('updated_at', yesterdayEnd);
-
-        counts.completed = { today: completedToday, yesterday: completedYesterday };
-
-        // --- Helper: compute percent ---
-        const computePercent = (todayVal, yesterdayVal) => {
-            if (yesterdayVal === 0) return 100;
-            return ((todayVal - yesterdayVal) / yesterdayVal) * 100;
-        };
-
-        // --- Helper: update tile ---
-        const updateTile = (valueId, trendId, iconId, todayVal, yesterdayVal) => {
-            const valueEl = document.getElementById(valueId);
-            const trendEl = document.getElementById(trendId);
-            const iconEl = document.getElementById(iconId);
-
-            if (valueEl) valueEl.textContent = todayVal ?? 0;
-
-            const percent = computePercent(todayVal, yesterdayVal).toFixed(1);
-            let arrow = '';
-            let colorClass = '';
-
-            if (percent > 0) {
-                arrow = 'arrow_upward';
-                colorClass = 'text-red-600';
-            } else if (percent < 0) {
-                arrow = 'arrow_downward';
-                colorClass = 'text-green-600';
-            } else {
-                arrow = '';
-                colorClass = 'text-gray-500';
-            }
-
-            if (iconEl) {
-                iconEl.textContent = arrow;
-                iconEl.className = `material-icons text-sm ${colorClass}`;
-            }
-
-            if (trendEl) {
-                const percentText = percent === 0 ? '0%' : Math.abs(percent) + '%';
-                trendEl.querySelector('span:last-child').textContent = percentText;
-                trendEl.querySelector('span:last-child').className = `text-sm font-medium ${colorClass}`;
-            }
-        };
-
-        // --- Update each tile ---
-        updateTile('value-total', 'trend-total', 'icon-total', counts.total.today, counts.total.yesterday);
-        updateTile('value-active', 'trend-active', 'icon-active', counts.active.today, counts.active.yesterday);
-        updateTile('value-completed', 'trend-completed', 'icon-completed', counts.completed.today, counts.completed.yesterday);
-
-    } catch (error) {
-        console.error("Error loading dashboard stats:", error);
-        if (totalElement) totalElement.textContent = "Err";
-        if (activeElement) activeElement.textContent = "Err";
-        if (completedElement) completedElement.textContent = "Err";
-    }
-}
-
-    /**
-     * Populates the feeder filter lists from the Supabase 'feeders' table.
-     */
-    async function populateFeeders(listId) {
-        const listContainer = document.getElementById(listId);
-        if (!listContainer) {
-             console.error(`populateFeeders: Could not find list container #${listId}`);
-             return;
-        }
-        listContainer.innerHTML = `<div class="p-2 text-sm text-gray-500">Loading feeders...</div>`;
-
-        if (!window.supabase) {
-            listContainer.innerHTML = `<div class="p-2 text-sm text-red-500">Supabase error</div>`;
-            return;
-        }
+    async function fetchHeatmapData() {
+        let heatPoints = [];
+        const STATUS_WEIGHT = { pending: 1, reported: 2, ongoing: 3 };
 
         try {
-            // Assumes a table 'feeders' with 'id' (number) and 'name' (string)
-            const { data: feeders, error } = await supabase
-                .from('feeders')
-                .select('id, name')
-                .order('name', { ascending: true });
+            // Pending
+            if (heatFilter === 'pending' || heatFilter === 'all') {
+                const { data: reportsData, error: reportsError } = await supabase
+                    .from('reports')
+                    .select('latitude, longitude, status')
+                    .eq('status', 'pending');
 
-            if (error) throw error;
-
-            listContainer.innerHTML = ""; // Clear loading
-            if (feeders.length === 0) {
-                listContainer.innerHTML = `<div class="p-2 text-sm text-gray-500">No feeders found.</div>`;
-                return;
+                if (!reportsError && reportsData) {
+                    const points = reportsData
+                        .filter(r => r.latitude && r.longitude)
+                        .map(r => [Number(r.latitude), Number(r.longitude), STATUS_WEIGHT.pending]);
+                    heatPoints = heatPoints.concat(points);
+                }
             }
 
-            feeders.forEach(feeder => {
-                const label = document.createElement("label");
-                label.className = "flex items-center gap-2 px-2 py-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors";
-                label.innerHTML = `
-                    <input type="checkbox" value="${feeder.id}" checked class="form-checkbox text-blue-600 dark:text-blue-400 feeder-checkbox">
-                    <span class="text-sm text-gray-700 dark:text-gray-200">${feeder.name}</span>
-                `;
-                listContainer.appendChild(label);
-            });
+            // Reported/Ongoing
+            if (heatFilter === 'reported_ongoing' || heatFilter === 'all') {
+                const { data: annData, error: annError } = await supabase
+                    .from('announcements')
+                    .select('latitude, longitude, status') 
+                    .in('status', ['Ongoing', 'Reported']);
 
-        } catch (error) {
-            console.error(`Error populating feeders for ${listId}:`, error.message);
-            listContainer.innerHTML = `<div class="p-2 text-sm text-red-500">Failed to load feeders.</div>`;
-        }
-    }
-
-    /**
-     * Fetches and displays the 6 most recent outage announcements.
-     */
-    async function loadRecentReports() {
-        if (!reportsTableBody) return;
-        
-        reportsTableBody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-gray-500 dark:text-gray-400">Loading recent announcements...</td></tr>`;
-
-        if (!window.supabase) {
-            reportsTableBody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-red-500">Supabase client not available.</td></tr>`;
-            return;
-        }
-
-        let recentAnnouncements = [];
-        let errorOccurred = false;
-        let errorMessage = '';
-
-        try {
-            // === UPDATED - Changed 'outages' to 'announcements' ===
-            // This query now targets the 'announcements' table as per your schema
-            const { data, error } = await supabase
-                .from('announcements') // Was 'outages', now 'announcements'
-                .select('*')
-                .order('created_at', { ascending: false }) // Newest first
-                .limit(6); // Limit to 6
-
-            if (error) throw error;
-            recentAnnouncements = data || [];
-        } catch (error) {
-            console.error("Error loading recent announcements:", error);
-            errorOccurred = true; errorMessage = `Could not load: ${error.message}`;
-        }
-
-        // --- Render Table ---
-        reportsTableBody.innerHTML = ""; // Clear loading/previous
-
-        if (errorOccurred) {
-            reportsTableBody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-red-500">${errorMessage}</td></tr>`;
-        } else if (recentAnnouncements.length === 0) {
-            reportsTableBody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-gray-400 dark:text-gray-500">No recent announcements found.</td></tr>`;
-        } else {
-            recentAnnouncements.forEach(outage => {
-                const row = document.createElement('tr');
-                row.className = "hover:bg-gray-50 dark:hover:bg-gray-700/50";
-                
-                // === UPDATED - Field name changed ===
-                // 'title' does not exist in your 'announcements' schema.
-                // We will use 'cause' or 'location' instead.
-                const titleOrArea = outage.cause || outage.location || outage.areas_affected?.[0] || 'N/A';
-                // === END OF UPDATE ===
-                
-                const feederId = outage.feeder_id || 'N/A';
-                const status = outage.status || 'Unknown';
-
-                row.innerHTML = `
-                  <td class="py-3 px-4 font-medium">${outage.id || 'N/A'}</td>
-                  <td class="py-3 px-4">${titleOrArea}</td>
-                  <td class="py-3 px-4">${feederId}</td>
-                  <td class="py-3 px-4">${formatTimestamp(outage.created_at)}</td>
-                  <td class="py-3 px-4">
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusClass(status)}">
-                      ${status}
-                    </span>
-                  </td>
-                  <td class="py-3 px-4 whitespace-nowrap">
-                     <a href="outages.html#outage-${outage.id}" title="View details on Outages page"
-                        class="px-3 py-1 text-xs font-medium text-blue-600 bg-blue-100 rounded-full hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-300 dark:hover:bg-blue-800 transition">
-                       View
-                     </a>
-                  </td>
-                `;
-                reportsTableBody.appendChild(row);
-            });
-        }
-    }
-
-    // ============================================
-    // === CHART & UI LOGIC (Client-Side) ===
-    // ============================================
-    
-    /** * Fetches feeder data and updates the pie chart.
-     * === UPDATED - This function is now fully implemented ===
-     */
-    
-    let feederChart, restorationChart;
-
-    document.addEventListener('DOMContentLoaded', async () => {
-    // Get canvas contexts
-    const feederCtx = document.getElementById('feederChartCanvas').getContext('2d');
-    const restorationCtx = document.getElementById('restorationChartCanvas').getContext('2d');
-
-    // Initialize charts
-    feederChart = new Chart(feederCtx, {
-        type: 'bar',
-        data: {
-        labels: [],
-        datasets: [{
-            label: 'Announcements per Feeder',
-            data: [],
-            backgroundColor: '#3B82F6',
-            borderRadius: 5
-        }]
-        },
-        options: {
-        responsive: true,
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true } }
-        }
-    });
-
-    restorationChart = new Chart(restorationCtx, {
-        type: 'bar',
-        data: {
-        labels: [],
-        datasets: [{
-            label: 'Avg Restoration Time (hrs)',
-            data: [],
-            backgroundColor: '#10B981',
-            borderRadius: 5
-        }]
-        },
-        options: {
-        responsive: true,
-        plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true } }
-        }
-    });
-
-    // 3️⃣ Load data and update charts
-    await loadCharts();
-    });
-
-    // 4️⃣ Load announcements and update charts
-    async function loadCharts() {
-    const { data: announcements, error } = await supabase
-        .from('announcements')
-        .select('id, feeder, created_at, restored_at'); // use created_at
-
-    if (error) return console.error('Error fetching announcements:', error);
-
-    const feederMap = {};
-    const restorationMap = {};
-
-    announcements.forEach(a => {
-        const feeder = a.feeder || 'Unknown';
-
-        // Count announcements per feeder
-        feederMap[feeder] = (feederMap[feeder] || 0) + 1;
-
-        // Calculate restoration time only if restored_at exists
-        if (a.restored_at) {
-        const hours = (new Date(a.restored_at) - new Date(a.created_at)) / (1000 * 60 * 60);
-        if (!restorationMap[feeder]) restorationMap[feeder] = [];
-        restorationMap[feeder].push(hours);
-        }
-    });
-
-    const labels = Object.keys(feederMap);
-
-    // Update feeder chart
-    feederChart.data.labels = labels;
-    feederChart.data.datasets[0].data = labels.map(f => feederMap[f]);
-    feederChart.update();
-
-    // Update restoration chart (average per feeder)
-    restorationChart.data.labels = labels;
-    restorationChart.data.datasets[0].data = labels.map(f => {
-        const times = restorationMap[f] || [];
-        return times.length ? (times.reduce((a, b) => a + b, 0) / times.length).toFixed(2) : 0;
-    });
-    restorationChart.update();
-    }
-    
-    async function updateFeederChart() {
-        if (!pieCanvas) return;
-        const listContainer = document.getElementById("feederList");
-        if (!listContainer) return;
-        
-        const checked = Array.from(listContainer.querySelectorAll("input.feeder-checkbox:checked")).map(cb => cb.value);
-        
-        if (checked.length === 0) {
-            if (feederChartInstance) feederChartInstance.destroy();
-            pieCanvas.getContext('2d').fillText("No feeders selected.", 10, 50);
-            return;
-        }
-
-        try {
-            // 1. Fetch announcement data, joining with the feeder name
-            const { data, error } = await supabase
-                .from('announcements')
-                .select('feeder_id, feeders ( name )') // Select feeder_id and the related feeder's name
-                .in('feeder_id', checked);
-
-            if (error) throw error;
-
-            // 2. Process data in JS to get counts
-            const feederCounts = data.reduce((acc, { feeder_id, feeders }) => {
-                if (!feeders) return acc; // Skip if join failed (e.g., null feeder_id)
-                const name = feeders.name || `Feeder ${feeder_id}`;
-                acc[name] = (acc[name] || 0) + 1;
-                return acc;
-            }, {});
-
-            const labels = Object.keys(feederCounts);
-            const values = Object.values(feederCounts);
-
-            // 3. Render with Chart.js
-            const chartData = {
-                labels: labels,
-                datasets: [{
-                    data: values,
-                    backgroundColor: ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#6366F1', '#EC4899'], // Example colors
-                }]
-            };
-
-            if (feederChartInstance) {
-                feederChartInstance.destroy(); // Destroy old chart
+                if (!annError && annData) {
+                    const points = annData
+                        .filter(r => r.latitude && r.longitude)
+                        .map(r => [
+                            Number(r.latitude), 
+                            Number(r.longitude), 
+                            STATUS_WEIGHT[r.status.toLowerCase()] || 2
+                        ]);
+                    heatPoints = heatPoints.concat(points);
+                }
             }
 
-            feederChartInstance = new Chart(pieCanvas, {
-                type: 'pie', // or 'doughnut'
-                data: chartData,
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: {
-                                color: document.body.classList.contains('dark') ? '#E5E7EB' : '#374151'
-                            }
-                        }
-                    }
-                }
-            });
-
-        } catch (error) {
-            console.error("Error updating feeder chart:", error.message);
-            pieCanvas.getContext('2d').fillText(`Error: ${error.message}`, 10, 50);
-        }
-    }
-    // === END OF UPDATE ===
-    
-    /** * Fetches restoration data and updates the bar chart.
-     * === UPDATED - This function is now fully implemented ===
-     */
-    async function updateRestorationChart() {
-        if (!barCanvas) return;
-        const listContainer = document.getElementById("restorationFeederList");
-        if (!listContainer) return;
-        
-        const checked = Array.from(listContainer.querySelectorAll("input.feeder-checkbox:checked")).map(cb => cb.value);
-
-        if (checked.length === 0) {
-            if (restorationChartInstance) restorationChartInstance.destroy();
-            barCanvas.getContext('2d').fillText("No feeders selected.", 10, 50);
-            return;
-        }
-
-        try {
-            // 1. Fetch completed announcements with timestamps and feeder names
-            const { data, error } = await supabase
-                .from('announcements')
-                .select('created_at, estimated_restoration_at, updated_at, status, feeder_id, feeders ( name )')
-                .in('feeder_id', checked)
-                .eq('status', 'Completed') // Only get completed ones
-                .not('estimated_restoration_at', 'is', null); // Ensure ETA was set
-
-            if (error) throw error;
-
-            // 2. Process data to get average restoration time
-            const feederTimes = data.reduce((acc, item) => {
-                if (!item.feeders) return acc; // Skip
-                
-                const name = item.feeders.name || `Feeder ${item.feeder_id}`;
-                if (!acc[name]) {
-                    acc[name] = { totalDuration: 0, count: 0 };
-                }
-
-                // Calculate duration in hours
-                // Use 'updated_at' as the actual completion time
-                const startTime = new Date(item.created_at);
-                const endTime = new Date(item.updated_at); // Use updated_at for when it was marked 'Completed'
-                const durationMs = endTime - startTime;
-                const durationHours = durationMs / (1000 * 60 * 60);
-
-                if (durationHours > 0 && durationHours < 1000) { // Basic sanity check
-                    acc[name].totalDuration += durationHours;
-                    acc[name].count += 1;
-                }
-                return acc;
-            }, {});
-
-            // 3. Finalize averages
-            const labels = Object.keys(feederTimes);
-            const values = labels.map(label => {
-                const { totalDuration, count } = feederTimes[label];
-                return count > 0 ? (totalDuration / count).toFixed(2) : 0; // Calculate average
-            });
-            
-            // 4. Render with Chart.js
-            if (restorationChartInstance) {
-                restorationChartInstance.destroy(); // Destroy old chart
+            if (heatLayer) heatLayer.remove();
+            if (heatPoints.length > 0) {
+                heatLayer = L.heatLayer(heatPoints, { radius: 25, blur: 15 }).addTo(map);
             }
-            
-            const isDark = document.body.classList.contains('dark');
-            const gridColor = isDark ? '#4B5563' : '#E5E7EB';
-            const textColor = isDark ? '#E5E7EB' : '#374151';
 
-            restorationChartInstance = new Chart(barCanvas, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Avg. Restoration Time (Hours)',
-                        data: values,
-                        backgroundColor: '#3B82F6',
-                        borderColor: '#3B82F6',
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: { color: gridColor },
-                            ticks: { color: textColor }
-                        },
-                        x: {
-                            grid: { display: false },
-                            ticks: { color: textColor }
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false // Hide legend for a cleaner bar chart
-                        }
-                    }
-                }
-            });
-
-        } catch (error) {
-            console.error("Error updating restoration chart:", error.message);
-            barCanvas.getContext('2d').fillText(`Error: ${error.message}`, 10, 50);
-        }
-    }
-    // === END OF UPDATE ===
-    
-    /** Helper: Get Status Badge Class */
-    /** Helper: Get Status Badge Class */
-    function getStatusClass(status) {
-        switch ((status || '').toLowerCase()) {
-            case 'reported':
-                return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300";
-            case 'ongoing':
-                return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300";
-            case 'completed':
-                return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
-            default:
-                return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300";
+        } catch (err) {
+            console.error("Error updating heatmap:", err);
         }
     }
 
-    /** Helper: Format Date */
-    function formatTimestamp(isoString) {
-      if (!isoString) return 'N/A';
-      try {
-          return new Date(isoString).toLocaleString('en-US', {
-              month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
-          });
-      } catch (e) { return 'Invalid Date'; }
-    }
-    
-    /** Helper: Update chart filter label */
-    function updateChartLabel(listId, labelId) {
-        const listContainer = document.getElementById(listId);
-        const labelEl = document.getElementById(labelId);
-        if (!listContainer || !labelEl) return;
-        const checkedCheckboxes = listContainer.querySelectorAll("input.feeder-checkbox:checked");
-        const checkedCount = checkedCheckboxes.length;
-        const totalCount = listContainer.querySelectorAll("input.feeder-checkbox").length;
+    fetchHeatmapData();
+    setInterval(fetchHeatmapData, 30000); 
 
-        if (totalCount === 0) {
-            labelEl.textContent = "Loading feeders..."; // Label before feeders are loaded
-            return;
-        }
-        if (checkedCount === 0) labelEl.textContent = "No feeders selected";
-        else if (checkedCount === totalCount) labelEl.textContent = "All feeders selected";
-        else {
-             const names = Array.from(checkedCheckboxes).slice(0, 3).map(cb => cb.closest('label').querySelector('span').textContent);
-             labelEl.textContent = names.join(", ") + (checkedCount > 3 ? ` + ${checkedCount - 3} more` : '');
-        }
-    }
+    const hFilterBtn = document.getElementById('heatmapFilterBtn');
+    const hFilterPopup = document.getElementById('heatmapFilterPopup');
+    const hFilterRadios = hFilterPopup ? hFilterPopup.querySelectorAll('input[name="heatmapFilter"]') : [];
 
-    /** Helper: Setup filter button listeners */
-    function setupFilterButton(buttonId, popupId, selectAllId, clearId, applyId, listId, labelId, chartUpdateFn) {
-        const button = document.getElementById(buttonId);
-        const popup = document.getElementById(popupId);
-        const selectAllBtn = document.getElementById(selectAllId);
-        const clearBtn = document.getElementById(clearId);
-        const applyBtn = document.getElementById(applyId);
-        const listContainer = document.getElementById(listId);
-
-        if (!button || !popup || !listContainer) {
-             console.error(`setupFilterButton: Missing critical elements for ${buttonId}`);
-             return;
-        }
-
-        if (typeof window.setupDropdownToggle === 'function') {
-            window.setupDropdownToggle(buttonId, popupId);
-        } else {
-            console.error("setupDropdownToggle function not found in shared.js");
-        }
-
-        if (selectAllBtn) {
-            selectAllBtn.addEventListener("click", (e) => {
-                e.stopPropagation(); 
-                listContainer.querySelectorAll("input.feeder-checkbox").forEach(cb => cb.checked = true);
-                updateChartLabel(listId, labelId);
-            });
-        }
-
-        if (clearBtn) {
-            clearBtn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                listContainer.querySelectorAll("input.feeder-checkbox").forEach(cb => cb.checked = false);
-                updateChartLabel(listId, labelId);
-            });
-        }
-
-        if (applyBtn) {
-            applyBtn.addEventListener("click", () => {
-                popup.classList.add('hidden'); 
-                updateChartLabel(listId, labelId); 
-                if (typeof chartUpdateFn === 'function') {
-                    chartUpdateFn(); 
-                }
-            });
-        }
-
-        listContainer.addEventListener("change", (e) => {
-             if (e.target.classList.contains('feeder-checkbox')) {
-                 // Don't update chart on every click, just update label
-                 updateChartLabel(listId, labelId);
-             }
+    if(hFilterBtn) {
+        hFilterBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            hFilterPopup.classList.toggle('hidden');
         });
     }
 
-    // ============================================
-    // === INITIALIZATION ===
-    // ============================================
-    
-    async function initDashboard() {
-        // Setup static UI listeners first
-        setupFilterButton(
-            "feederFilterBtn", "feederFilterPopup",
-            "feederSelectAll", "feederClear", "feederApply",
-            "feederList", "feederChartLabel",
-            updateFeederChart
-        );
-        setupFilterButton(
-            "restorationFilterBtn", "restorationFilterPopup",
-            "restorationSelectAll", "restorationClear", "restorationApply",
-            "restorationFeederList", "restorationChartLabel",
-            updateRestorationChart
-        );
-        
-        // Fetch dynamic data
-        // We use Promise.all to run these in parallel for faster loading
-        await Promise.all([
-            loadDashboardStats(),
-            loadRecentReports(),
-            populateFeeders("feederList"),
-            populateFeeders("restorationFeederList")
-        ]);
-        
-        // Update labels *after* feeders are populated
-        updateChartLabel("feederList", "feederChartLabel");
-        updateChartLabel("restorationFeederList", "restorationChartLabel");
+    hFilterRadios.forEach(radio => {
+        radio.addEventListener('change', e => {
+            heatFilter = e.target.value;
+            const labelText = e.target.nextElementSibling.textContent;
+            const spans = hFilterBtn.querySelectorAll('span');
+            if (spans.length > 1) spans[1].textContent = labelText;
+            fetchHeatmapData(); 
+            hFilterPopup.classList.add('hidden');
+        });
+    });
 
-        // Run initial chart queries now that everything is loaded
+    // ==============================
+    // 2. DATE FILTER & STATS
+    // ==============================
+
+    if (dateDropdownBtn && calendarDropdown) {
+        dateDropdownBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            calendarDropdown.classList.toggle('hidden');
+        });
+        document.addEventListener('click', (e) => {
+            if (!dateDropdownBtn.contains(e.target) && !calendarDropdown.contains(e.target)) {
+                calendarDropdown.classList.add('hidden');
+            }
+        });
+    }
+
+    if (applyDateBtn && calendarInput) {
+        applyDateBtn.addEventListener('click', () => {
+            const selectedDate = calendarInput.value;
+            if (selectedDate) {
+                selectedDateLabel.textContent = selectedDate;
+                calendarDropdown.classList.add('hidden');
+                loadDashboardStats(selectedDate);
+            }
+        });
+    }
+
+    async function loadDashboardStats(targetDateStr = null) {
+        if (!window.supabase) return;
+        try {
+            let targetDate = targetDateStr ? new Date(targetDateStr) : new Date();
+            let compareDate = new Date(targetDate);
+            compareDate.setDate(targetDate.getDate() - 1);
+
+            const formatDate = d => d.toISOString().split('T')[0];
+            const targetStart = formatDate(targetDate) + "T00:00:00Z";
+            const targetEnd = formatDate(targetDate) + "T23:59:59Z";
+            const compareStart = formatDate(compareDate) + "T00:00:00Z";
+            const compareEnd = formatDate(compareDate) + "T23:59:59Z";
+
+            const getCount = async (table, statusCol, statusVal, dateCol, start, end) => {
+                let query = supabase.from(table).select('id', { count: 'exact', head: true });
+                if (statusCol && statusVal) query = query.eq(statusCol, statusVal);
+                query = query.gte(dateCol, start).lte(dateCol, end);
+                const { count } = await query;
+                return count || 0;
+            };
+
+            const totalToday = await getCount('announcements', null, null, 'created_at', targetStart, targetEnd);
+            const totalYest = await getCount('announcements', null, null, 'created_at', compareStart, compareEnd);
+            const activeToday = await getCount('announcements', 'status', 'Ongoing', 'created_at', targetStart, targetEnd);
+            const activeYest = await getCount('announcements', 'status', 'Ongoing', 'created_at', compareStart, compareEnd);
+            const completedToday = await getCount('announcements', 'status', 'Completed', 'restored_at', targetStart, targetEnd);
+            const completedYest = await getCount('announcements', 'status', 'Completed', 'restored_at', compareStart, compareEnd);
+
+            const updateTile = (valId, trendId, iconId, current, previous) => {
+                document.getElementById(valId).textContent = current;
+                let percent = 0;
+                if (previous > 0) percent = ((current - previous) / previous) * 100;
+                else if (current > 0) percent = 100;
+                
+                let isGood = (valId === 'value-completed') ? percent >= 0 : percent <= 0;
+                const iconEl = document.getElementById(iconId);
+                const trendEl = document.getElementById(trendId);
+
+                iconEl.textContent = percent > 0 ? 'arrow_upward' : percent < 0 ? 'arrow_downward' : 'remove';
+                const colorClass = isGood ? "text-green-600" : "text-red-600";
+                iconEl.className = `material-icons text-sm ${percent === 0 ? 'text-gray-500' : colorClass}`;
+                
+                trendEl.querySelector('span:last-child').textContent = (percent > 0 ? '+' : '') + Math.abs(percent).toFixed(1) + '%';
+                trendEl.querySelector('span:last-child').className = `text-sm font-medium ${percent === 0 ? 'text-gray-500' : colorClass}`;
+            };
+
+            updateTile('value-total', 'trend-total', 'icon-total', totalToday, totalYest);
+            updateTile('value-active', 'trend-active', 'icon-active', activeToday, activeYest);
+            updateTile('value-completed', 'trend-completed', 'icon-completed', completedToday, completedYest);
+        } catch (error) { console.error("Stats Error:", error); }
+    }
+
+
+    // ==============================
+    // 3. ORIGINAL CHARTS (Feeders)
+    // ==============================
+
+    async function populateFeeders(listId) {
+        const listContainer = document.getElementById(listId);
+        if (!listContainer) return;
+        
+        listContainer.innerHTML = `<div class="p-2 text-sm text-gray-500">Loading...</div>`;
+
+        const { data: feeders } = await supabase.from('feeders').select('id, name').order('name', { ascending: true });
+        listContainer.innerHTML = "";
+
+        if (feeders && feeders.length > 0) {
+            feeders.forEach(feeder => {
+                const label = document.createElement("label");
+                label.className = "flex items-center gap-2 px-2 py-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded";
+                label.innerHTML = `<input type="checkbox" value="${feeder.id}" checked class="form-checkbox text-blue-600 feeder-checkbox"><span class="text-sm text-gray-700 dark:text-gray-200">${feeder.name}</span>`;
+                listContainer.appendChild(label);
+            });
+        } else { listContainer.innerHTML = `<div class="p-2 text-sm">No feeders.</div>`; }
+    }
+
+    async function updateFeederChart() {
+        if (!pieCanvas) return;
+        const checked = Array.from(document.querySelectorAll("#feederList input:checked")).map(cb => cb.value);
+        if (checked.length === 0) { if (feederChartInstance) feederChartInstance.destroy(); return; }
+
+        const { data } = await supabase.from('announcements').select('feeder_id, feeders ( name )').in('feeder_id', checked);
+        
+        const counts = {};
+        data?.forEach(item => {
+            const name = item.feeders ? item.feeders.name : `Feeder ${item.feeder_id}`;
+            counts[name] = (counts[name] || 0) + 1;
+        });
+
+        if (feederChartInstance) feederChartInstance.destroy();
+        feederChartInstance = new Chart(pieCanvas, {
+            type: 'pie',
+            data: {
+                labels: Object.keys(counts),
+                datasets: [{ data: Object.values(counts), backgroundColor: ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#6366F1', '#EC4899'] }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+        });
+    }
+
+    async function updateRestorationChart() {
+        if (!barCanvas) return;
+        const checked = Array.from(document.querySelectorAll("#restorationFeederList input:checked")).map(cb => cb.value);
+        if (checked.length === 0) { if (restorationChartInstance) restorationChartInstance.destroy(); return; }
+
+        const { data } = await supabase.from('announcements').select('created_at, restored_at, feeder_id, feeders ( name )')
+            .eq('status', 'Completed').in('feeder_id', checked).not('restored_at', 'is', null);
+
+        const accData = {}; 
+        data?.forEach(item => {
+            const name = item.feeders ? item.feeders.name : `ID ${item.feeder_id}`;
+            const hrs = (new Date(item.restored_at) - new Date(item.created_at)) / 36e5;
+            if (hrs > 0 && hrs < 1000) {
+                if (!accData[name]) accData[name] = { total: 0, count: 0 };
+                accData[name].total += hrs;
+                accData[name].count++;
+            }
+        });
+
+        const labels = Object.keys(accData);
+        const values = labels.map(k => (accData[k].total / accData[k].count).toFixed(2));
+        const isDark = document.documentElement.classList.contains('dark');
+
+        if (restorationChartInstance) restorationChartInstance.destroy();
+        restorationChartInstance = new Chart(barCanvas, {
+            type: 'bar',
+            data: { labels: labels, datasets: [{ label: 'Avg Hours', data: values, backgroundColor: '#3B82F6' }] },
+            options: {
+                responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, ticks: { color: isDark ? '#e5e7eb' : '#374151' }, grid: { color: isDark ? '#374151' : '#e5e7eb' } },
+                    x: { ticks: { color: isDark ? '#e5e7eb' : '#374151' }, grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    // ==============================
+    // 4. NEW ADVANCED ANALYTICS
+    // ==============================
+    async function loadAdvancedAnalytics() {
+        const rootCtx = document.getElementById('rootCauseChart');
+        const brgyCtx = document.getElementById('barangayImpactChart');
+        const peakCtx = document.getElementById('peakTimeChart');
+        const mttrCtx = document.getElementById('mttrTrendChart');
+
+        if (!rootCtx || !brgyCtx || !peakCtx || !mttrCtx) return;
+        const isDark = document.documentElement.classList.contains('dark');
+        const textColor = isDark ? '#e5e7eb' : '#374151';
+
+        // Fetch ALL needed data in one go to optimize
+        const { data: allAnnouncements } = await supabase
+            .from('announcements')
+            .select('cause, areas_affected, created_at, restored_at, status')
+            .order('created_at', { ascending: true });
+
+        if (!allAnnouncements) return;
+
+        // --- A. Root Cause (Pareto) ---
+        const causeCounts = {};
+        allAnnouncements.forEach(a => {
+            const c = a.cause || 'Unknown';
+            causeCounts[c] = (causeCounts[c] || 0) + 1;
+        });
+        
+        const sortedCauses = Object.entries(causeCounts).sort((a, b) => b[1] - a[1]).slice(0, 5); // Top 5
+        
+        if (rootCauseInstance) rootCauseInstance.destroy();
+        rootCauseInstance = new Chart(rootCtx, {
+            type: 'bar',
+            data: {
+                labels: sortedCauses.map(i => i[0]),
+                datasets: [{ label: 'Incidents', data: sortedCauses.map(i => i[1]), backgroundColor: '#F59E0B', borderRadius: 4 }]
+            },
+            options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor } } } }
+        });
+
+        // --- B. Most Affected Barangays ---
+        const brgyCounts = {};
+        allAnnouncements.forEach(a => {
+            if (Array.isArray(a.areas_affected)) {
+                a.areas_affected.forEach(b => {
+                    brgyCounts[b] = (brgyCounts[b] || 0) + 1;
+                });
+            }
+        });
+        const sortedBrgys = Object.entries(brgyCounts).sort((a, b) => b[1] - a[1]).slice(0, 8); // Top 8
+
+        if (barangayImpactInstance) barangayImpactInstance.destroy();
+        barangayImpactInstance = new Chart(brgyCtx, {
+            type: 'bar',
+            data: {
+                labels: sortedBrgys.map(i => i[0]),
+                datasets: [{ label: 'Outage Events', data: sortedBrgys.map(i => i[1]), backgroundColor: '#EF4444', borderRadius: 4 }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor } } } }
+        });
+
+        // --- C. Peak Outage Times (Bubble Chart Simulation) ---
+        // X = Hour (0-23), Y = Day (0-6), R = Count
+        const timeMatrix = {};
+        allAnnouncements.forEach(a => {
+            const date = new Date(a.created_at);
+            const key = `${date.getDay()}-${date.getHours()}`;
+            timeMatrix[key] = (timeMatrix[key] || 0) + 1;
+        });
+
+        const bubbleData = Object.entries(timeMatrix).map(([key, count]) => {
+            const [day, hour] = key.split('-').map(Number);
+            return { x: hour, y: day, r: Math.min(count * 2, 20) }; // Scale radius
+        });
+
+        if (peakTimeInstance) peakTimeInstance.destroy();
+        peakTimeInstance = new Chart(peakCtx, {
+            type: 'bubble',
+            data: { datasets: [{ label: 'Outage Frequency', data: bubbleData, backgroundColor: 'rgba(59, 130, 246, 0.6)' }] },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                    x: { min: 0, max: 24, title: { display: true, text: 'Hour of Day (24h)', color: textColor }, ticks: { color: textColor } },
+                    y: { 
+                        min: -1, max: 7, 
+                        ticks: { callback: v => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][v], color: textColor } 
+                    }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+
+        // --- D. MTTR Trend (Line Chart) ---
+        const mttrByMonth = {};
+        allAnnouncements.forEach(a => {
+            if (a.restored_at && a.created_at) {
+                const date = new Date(a.created_at);
+                const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+                const hrs = (new Date(a.restored_at) - date) / 36e5;
+                if (hrs > 0 && hrs < 1000) {
+                    if (!mttrByMonth[monthKey]) mttrByMonth[monthKey] = { total: 0, count: 0 };
+                    mttrByMonth[monthKey].total += hrs;
+                    mttrByMonth[monthKey].count++;
+                }
+            }
+        });
+
+        const sortedMonths = Object.keys(mttrByMonth).sort();
+        const mttrValues = sortedMonths.map(m => (mttrByMonth[m].total / mttrByMonth[m].count).toFixed(2));
+
+        if (mttrTrendInstance) mttrTrendInstance.destroy();
+        mttrTrendInstance = new Chart(mttrCtx, {
+            type: 'line',
+            data: {
+                labels: sortedMonths,
+                datasets: [{ label: 'Avg Repair Time (Hrs)', data: mttrValues, borderColor: '#10B981', tension: 0.3, fill: true, backgroundColor: 'rgba(16, 185, 129, 0.1)' }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: textColor } }, y: { ticks: { color: textColor } } } }
+        });
+    }
+
+    // ==============================
+    // 5. RECENT REPORTS & INIT
+    // ==============================
+    async function loadRecentReports() {
+        if (!reportsTableBody) return;
+        reportsTableBody.innerHTML = `<tr><td colspan="6" class="text-center py-4">Loading...</td></tr>`;
+        const { data } = await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(6);
+        reportsTableBody.innerHTML = "";
+
+        if (data && data.length > 0) {
+            data.forEach(item => {
+                const row = document.createElement('tr');
+                row.className = "hover:bg-gray-50 dark:hover:bg-gray-700/50";
+                const title = item.cause || item.location || "Outage";
+                const statusClass = getStatusClass(item.status);
+                const dateStr = new Date(item.created_at).toLocaleDateString() + ' ' + new Date(item.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                row.innerHTML = `<td class="py-3 px-4 dark:text-gray-200">${item.id}</td><td class="py-3 px-4 dark:text-gray-300">${title}</td><td class="py-3 px-4 dark:text-gray-300">${item.feeder_id || '-'}</td><td class="py-3 px-4 dark:text-gray-300">${dateStr}</td><td class="py-3 px-4"><span class="px-2 py-1 rounded-full text-xs font-medium ${statusClass}">${item.status}</span></td><td class="py-3 px-4"><a href="outages.html" class="text-blue-600 hover:underline text-xs font-medium">View</a></td>`;
+                reportsTableBody.appendChild(row);
+            });
+        } else { reportsTableBody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-gray-500">No recent announcements.</td></tr>`; }
+    }
+
+    function getStatusClass(status) {
+        if(!status) return "bg-gray-100 text-gray-800";
+        const s = status.toLowerCase();
+        if(s === 'reported') return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200";
+        if(s === 'ongoing') return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200";
+        if(s === 'completed') return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
+        return "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300";
+    }
+
+    function setupFilter(btnId, popupId, selectAllId, clearId, applyId, listId, updateFn) {
+        const btn = document.getElementById(btnId);
+        const popup = document.getElementById(popupId);
+        const selectAll = document.getElementById(selectAllId);
+        const clear = document.getElementById(clearId);
+        const apply = document.getElementById(applyId);
+        const list = document.getElementById(listId);
+
+        if(btn) btn.addEventListener('click', (e) => { e.stopPropagation(); popup.classList.toggle('hidden'); });
+        document.addEventListener('click', (e) => { if(btn && popup && !btn.contains(e.target) && !popup.contains(e.target)) { popup.classList.add('hidden'); }});
+        if(selectAll) selectAll.addEventListener('click', (e) => { e.stopPropagation(); list.querySelectorAll('input').forEach(i => i.checked = true); });
+        if(clear) clear.addEventListener('click', (e) => { e.stopPropagation(); list.querySelectorAll('input').forEach(i => i.checked = false); });
+        if(apply) apply.addEventListener('click', () => { popup.classList.add('hidden'); updateFn(); });
+    }
+
+    async function initDashboard() {
+        setupFilter("feederFilterBtn", "feederFilterPopup", "feederSelectAll", "feederClear", "feederApply", "feederList", updateFeederChart);
+        setupFilter("restorationFilterBtn", "restorationFilterPopup", "restorationSelectAll", "restorationClear", "restorationApply", "restorationFeederList", updateRestorationChart);
+
+        loadDashboardStats(); 
+        loadRecentReports();
+        
+        // Init Advanced Analytics
+        loadAdvancedAnalytics();
+
+        await Promise.all([populateFeeders("feederList"), populateFeeders("restorationFeederList")]);
         updateFeederChart();
         updateRestorationChart();
     }
 
-    // Run the dashboard initialization
-    initDashboard();
-    
-}); // End DOMContentLoaded
+    // ==============================
+    // 6. PROFESSIONAL PDF REPORTING (COMPLETE & FIXED)
+    // ==============================
 
+    let currentPDFDoc = null; 
+
+    // A. The "Brain": Generates recommendations for ALL charts
+    function generateAnalysis(type, chartInstance) {
+        if (!chartInstance || !chartInstance.data.datasets[0].data.length) return "Insufficient data for analysis.";
+        
+        const data = chartInstance.data.datasets[0].data;
+        const labels = chartInstance.data.labels;
+
+        // 1. Root Cause
+        if (type === 'rootCause') {
+            const maxVal = Math.max(...data);
+            const topCause = labels[data.indexOf(maxVal)];
+            if (topCause.includes('Vegetation')) return "Recommendation: Increase tree trimming schedule in high-risk corridors.";
+            if (topCause.includes('Equipment')) return "Recommendation: Audit aging transformers and schedule preventive maintenance.";
+            return `Recommendation: Investigate high frequency of '${topCause}' outages.`;
+        }
+        // 2. MTTR Trend (Efficiency)
+        if (type === 'mttr') {
+            const first = parseFloat(data[0]);
+            const last = parseFloat(data[data.length - 1]);
+            if (last < first) return "Analysis: Repair times are trending DOWN (Improving).\nRecommendation: Current maintenance strategies are effective.";
+            if (last > first) return "Analysis: Repair times are trending UP (Slower).\nRecommendation: Investigate dispatch delays or staffing shortages.";
+            return "Analysis: Repair times are stable.";
+        }
+        // 3. Feeder Impact (Pie)
+        if (type === 'feederCount') {
+            const maxVal = Math.max(...data);
+            const name = labels[data.indexOf(maxVal)];
+            return `Analysis: ${name} accounts for the highest volume of reports (${maxVal}).\nRecommendation: Prioritize infrastructure inspection on this line.`;
+        }
+        // 4. Restoration by Feeder (Bar)
+        if (type === 'feederTime') {
+            const maxVal = Math.max(...data);
+            const name = labels[data.indexOf(maxVal)];
+            return `Analysis: ${name} has the slowest recovery time (${maxVal} hrs avg).\nRecommendation: Check for access issues or equipment faults specific to this area.`;
+        }
+        // 5. Barangay Impact
+        if (type === 'barangay') {
+            const maxVal = Math.max(...data);
+            const name = labels[data.indexOf(maxVal)];
+            return `Analysis: ${name} is the most frequently affected community.\nRecommendation: Engage with community leaders in ${name} regarding upcoming improvements.`;
+        }
+        // 6. Peak Times
+        if (type === 'peak') {
+            // Bubble chart data structure is {x, y, r}
+            const dataset = chartInstance.data.datasets[0].data;
+            if(!dataset.length) return "No peak data.";
+            // Find biggest bubble
+            const maxBubble = dataset.reduce((prev, current) => (prev.r > current.r) ? prev : current);
+            const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+            return `Analysis: Highest outage frequency observed on ${days[maxBubble.y]}s around ${maxBubble.x}:00 hours.\nRecommendation: Schedule additional standby crews during this window.`;
+        }
+
+        return "Data available in chart.";
+    }
+
+    // B. The Generator
+    async function generatePDFObject() {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const pageHeight = doc.internal.pageSize.getHeight();
+        const margin = 15;
+        let yPos = 20;
+
+        // --- 1. HEADER & SECURITY WARNING ---
+        doc.setFontSize(24);
+        doc.setTextColor(0, 123, 255); // Blue
+        doc.setFont("helvetica", "bold");
+        doc.text("BEACON SYSTEM REPORT", margin, yPos);
+        
+        yPos += 8;
+        doc.setFontSize(10);
+        doc.setTextColor(100);
+        doc.setFont("helvetica", "normal");
+        
+        // Get Admin Name from DOM
+        const adminName = document.getElementById('adminName') ? document.getElementById('adminName').innerText : "Authorized Account";
+        doc.text(`Generated by: ${adminName}  |  Date: ${new Date().toLocaleString()}`, margin, yPos);
+
+        yPos += 10;
+        // Warning Box
+        doc.setFillColor(255, 240, 240); // Light Red
+        doc.setDrawColor(200, 0, 0); // Dark Red Border
+        doc.rect(margin, yPos - 5, pageWidth - (margin * 2), 12, 'FD');
+        doc.setTextColor(200, 0, 0);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.text("WARNING: CONFIDENTIAL DATA. AUTHORIZED PERSONNEL ONLY.", pageWidth / 2, yPos + 2, { align: "center" });
+
+        // --- 2. EXECUTIVE SUMMARY (TILES) ---
+        yPos += 20;
+        doc.setTextColor(0);
+        doc.setFontSize(14);
+        doc.text("1. Executive Summary (vs. Yesterday)", margin, yPos);
+        
+        yPos += 10;
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+
+        // Grab Data
+        const tVal = document.getElementById('value-total')?.textContent || "0";
+        const tTrend = document.getElementById('trendPercent-total')?.textContent || "0%";
+        
+        const aVal = document.getElementById('value-active')?.textContent || "0";
+        const aTrend = document.getElementById('trendPercent-active')?.textContent || "0%";
+
+        const cVal = document.getElementById('value-completed')?.textContent || "0";
+        const cTrend = document.getElementById('trendPercent-completed')?.textContent || "0%";
+
+        // Draw Summary Grid
+        const boxWidth = (pageWidth - (margin * 2)) / 3;
+        const boxH = 25;
+        
+        // Box 1
+        doc.setFillColor(245, 247, 250); doc.rect(margin, yPos, boxWidth - 2, boxH, 'F');
+        doc.setFont("helvetica", "bold"); doc.text("Total Reports", margin + 5, yPos + 8);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(16); doc.text(tVal, margin + 5, yPos + 18);
+        doc.setFontSize(10); doc.setTextColor(tTrend.includes('+') ? 200 : 0, tTrend.includes('+') ? 0 : 150, 0); // Red if +, Green if - (Context dependent)
+        doc.text(tTrend, margin + 20, yPos + 18);
+
+        // Box 2
+        doc.setTextColor(0);
+        doc.setFillColor(245, 247, 250); doc.rect(margin + boxWidth, yPos, boxWidth - 2, boxH, 'F');
+        doc.setFont("helvetica", "bold"); doc.text("Active Outages", margin + boxWidth + 5, yPos + 8);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(16); doc.text(aVal, margin + boxWidth + 5, yPos + 18);
+        doc.setFontSize(10); doc.text(aTrend, margin + boxWidth + 20, yPos + 18);
+
+        // Box 3
+        doc.setTextColor(0);
+        doc.setFillColor(245, 247, 250); doc.rect(margin + (boxWidth * 2), yPos, boxWidth - 2, boxH, 'F');
+        doc.setFont("helvetica", "bold"); doc.text("Completed Repairs", margin + (boxWidth * 2) + 5, yPos + 8);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(16); doc.text(cVal, margin + (boxWidth * 2) + 5, yPos + 18);
+        doc.setFontSize(10); doc.text(cTrend, margin + (boxWidth * 2) + 20, yPos + 18);
+
+        yPos += 35;
+
+        // --- 3. CHARTS LOOP ---
+        const allCharts = [
+            { title: "2. Outages by Feeder", instance: feederChartInstance, type: 'feederCount' },
+            { title: "3. Avg Restoration Time by Feeder", instance: restorationChartInstance, type: 'feederTime' },
+            { title: "4. Root Cause Analysis", instance: rootCauseInstance, type: 'rootCause' },
+            { title: "5. Most Affected Barangays", instance: barangayImpactInstance, type: 'barangay' },
+            { title: "6. Peak Outage Times", instance: peakTimeInstance, type: 'peak' },
+            { title: "7. Monthly Efficiency Trend", instance: mttrTrendInstance, type: 'mttr' }
+        ];
+
+        doc.setTextColor(0);
+
+        allCharts.forEach((item, index) => {
+            if (item.instance) {
+                // --- FIX: Calculate if the WHOLE chart fits ---
+                // Height of: Title(6) + Image(80) + Box(20) + Spacing(24) = ~130
+                const neededHeight = 130;
+                
+                if (yPos + neededHeight > pageHeight) { 
+                    doc.addPage(); 
+                    yPos = 20; 
+                }
+
+                // Title
+                doc.setFontSize(12);
+                doc.setFont("helvetica", "bold");
+                doc.text(item.title, margin, yPos);
+                yPos += 6;
+
+                try {
+                    // Chart
+                    const canvasImg = item.instance.toBase64Image();
+                    // Scale image to fit width
+                    const imgWidth = 180;
+                    const imgHeight = 80;
+                    doc.addImage(canvasImg, 'PNG', margin, yPos, imgWidth, imgHeight);
+                    yPos += imgHeight + 5;
+
+                    // Recommendation Box
+                    doc.setFillColor(240, 248, 255); // AliceBlue
+                    doc.setDrawColor(200, 200, 200);
+                    doc.rect(margin, yPos, pageWidth - (margin * 2), 20, 'DF');
+                    
+                    doc.setFont("helvetica", "normal");
+                    doc.setFontSize(9);
+                    doc.setTextColor(60);
+                    
+                    const analysisText = generateAnalysis(item.type, item.instance);
+                    const splitText = doc.splitTextToSize(analysisText, pageWidth - (margin * 2) - 10);
+                    doc.text(splitText, margin + 5, yPos + 7);
+                    
+                    doc.setTextColor(0);
+                    yPos += 30; // Spacing for next chart
+                } catch (e) { console.error("Chart error:", e); }
+            }
+        });
+
+        // Footer
+        const totalPages = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= totalPages; i++) {
+            doc.setPage(i);
+            doc.setFontSize(8);
+            doc.setTextColor(150);
+            doc.text(`Page ${i} of ${totalPages}`, pageWidth - 20, pageHeight - 10, { align: 'right' });
+            doc.text("BEACON Internal Document", margin, pageHeight - 10);
+        }
+
+        return doc;
+    }
+
+    // C. Preview & Download Handlers (Same as before)
+    async function handlePreviewOpen() {
+        const modal = document.getElementById('pdfPreviewModal');
+        const iframe = document.getElementById('pdfPreviewFrame');
+        const loading = document.getElementById('pdfLoading');
+        
+        if(!modal || !iframe) return;
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        iframe.classList.add('hidden');
+        loading.classList.remove('hidden');
+
+        currentPDFDoc = await generatePDFObject();
+        const pdfBlob = currentPDFDoc.output('bloburl');
+        iframe.src = pdfBlob;
+
+        loading.classList.add('hidden');
+        iframe.classList.remove('hidden');
+    }
+
+    function handlePreviewClose() {
+        const modal = document.getElementById('pdfPreviewModal');
+        if(modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+        const iframe = document.getElementById('pdfPreviewFrame');
+        if(iframe) iframe.src = "";
+    }
+
+    function handleDownload() {
+        if (currentPDFDoc) {
+            const dateStr = new Date().toISOString().split('T')[0];
+            const adminName = document.getElementById('adminName') ? document.getElementById('adminName').innerText : "Admin";
+            currentPDFDoc.save(`Beacon_Report_${adminName}_${dateStr}.pdf`);
+            handlePreviewClose();
+        }
+    }
+
+    // Listeners
+    const triggerBtn = document.getElementById('downloadReportBtn');
+    const closeBtn = document.getElementById('closePreviewBtn');
+    const cancelBtn = document.getElementById('cancelPreviewBtn');
+    const confirmBtn = document.getElementById('confirmDownloadBtn');
+
+    if (triggerBtn) triggerBtn.addEventListener('click', handlePreviewOpen);
+    if (closeBtn) closeBtn.addEventListener('click', handlePreviewClose);
+    if (cancelBtn) cancelBtn.addEventListener('click', handlePreviewClose);
+    if (confirmBtn) confirmBtn.addEventListener('click', handleDownload);
+
+    initDashboard();
+});

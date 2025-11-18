@@ -209,9 +209,16 @@
             </div>
           </div>
 
-          <h3 class="text-xl font-semibold mb-4 text-gray-700 dark:text-gray-300 flex items-center">
-            Analytics
-          </h3>
+          <div class="flex justify-between items-center mb-4 mt-8">
+            <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300">
+              Analytics
+            </h3>
+
+            <button id="downloadReportBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition shadow-sm">
+              <span class="material-icons text-sm">picture_as_pdf</span>
+              <span>Download Report</span>
+            </button>
+          </div>
 
           <div class="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-8">
 
@@ -251,10 +258,9 @@
                   </div>
                 </div>
               </div>
-              <div class="chart-wrapper h-72 w-full">
-                <canvas id="feederChartCanvas" class="w-full h-70">
-                  <!-- Chart will be rendered here -->
-                </canvas>
+              <div class="chart-wrapper h-72 w-full relative">
+                <canvas id="feederChartCanvas" class="w-full h-full">
+                  </canvas>
               </div>
               <p id="feederChartLabel" class="mt-auto text-sm text-gray-600 dark:text-gray-300">All feeders selected</p>
             </div>
@@ -295,20 +301,55 @@
                   </div>
                 </div>
               </div>
-              <div class="chart-wrapper h-72 w-full">
-                <canvas id="restorationChartCanvas" class="w-full h-70">
-                  <!-- Chart will be rendered here -->
-                </canvas>
+              <div class="chart-wrapper h-72 w-full relative">
+                <canvas id="restorationChartCanvas" class="w-full h-full">
+                  </canvas>
               </div>
               <p id="restorationChartLabel" class="mt-auto text-sm text-gray-600 dark:text-gray-300">All feeders selected</p>
             </div>
+
+            <h3 class="lg:col-span-5 text-xl font-semibold mt-4 text-gray-700 dark:text-gray-300">
+              Advanced Analytics
+            </h3>
+
+            <div class="lg:col-span-2 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md flex flex-col">
+                <h4 class="font-semibold text-gray-700 dark:text-gray-300 mb-2">Root Cause Analysis</h4>
+                <div class="h-64 w-full relative">
+                <canvas id="rootCauseChart" class="w-full h-full"></canvas>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Top reasons for outages</p>
+            </div>
+
+            <div class="lg:col-span-3 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md flex flex-col">
+                <h4 class="font-semibold text-gray-700 dark:text-gray-300 mb-2">Most Affected Barangays</h4>
+                <div class="h-64 w-full relative">
+                <canvas id="barangayImpactChart" class="w-full h-full"></canvas>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Frequency of outages per area</p>
+            </div>
+
+            <div class="lg:col-span-3 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md flex flex-col">
+                <h4 class="font-semibold text-gray-700 dark:text-gray-300 mb-2">Peak Outage Times</h4>
+                <div class="h-64 w-full relative">
+                <canvas id="peakTimeChart" class="w-full h-full"></canvas>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Bubble size indicates outage frequency</p>
+            </div>
+
+            <div class="lg:col-span-2 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md flex flex-col">
+                <h4 class="font-semibold text-gray-700 dark:text-gray-300 mb-2">Restoration Speed Trend (MTTR)</h4>
+                <div class="h-64 w-full relative">
+                <canvas id="mttrTrendChart" class="w-full h-full"></canvas>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Avg. repair time (hours) over last 6 months</p>
+            </div>
+
             <div class="lg:col-span-5 bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md flex flex-col mb-8 relative">
   
             <h4 class="font-semibold text-gray-700 dark:text-gray-300 text-lg mb-4">
               Outage Density Heatmap
             </h4>
 
-            <!-- Toggle button at top right -->
             <div class="absolute top-6 right-6 z-50">
               <button id="heatmapFilterBtn" class="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 rounded-md text-sm flex items-center gap-2 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors relative">
                 <span class="material-icons text-sm">filter_list</span>
@@ -331,7 +372,6 @@
               </div>
             </div>
 
-            <!-- Map container -->
             <div id="map" class="w-full h-[700px] rounded-xl overflow-hidden shadow-md border border-black-200 dark:border-gray-600 z-0"></div>
             
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-2 text-center">
@@ -429,7 +469,41 @@
 
 </div>
 
+<div id="pdfPreviewModal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center z-[100]">
+  <div class="bg-white dark:bg-gray-800 w-full max-w-5xl h-[90vh] flex flex-col rounded-xl shadow-2xl overflow-hidden transform transition-all">
+    
+    <div class="flex justify-between items-center px-6 py-4 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+      <div>
+        <h3 class="text-lg font-bold text-gray-800 dark:text-white">Report Preview</h3>
+        <p class="text-xs text-gray-500 dark:text-gray-400">Review analysis before downloading</p>
+      </div>
+      <button id="closePreviewBtn" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition">
+        <span class="material-icons">close</span>
+      </button>
+    </div>
+
+    <div class="flex-1 bg-gray-200 dark:bg-gray-900 p-4 overflow-hidden flex justify-center items-center">
+       <div id="pdfLoading" class="hidden absolute flex flex-col items-center">
+           <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-3"></div>
+           <span class="text-gray-600 dark:text-gray-300 font-medium">Generating Report...</span>
+       </div>
+       <iframe id="pdfPreviewFrame" class="w-full h-full rounded shadow-lg border border-gray-300 dark:border-gray-700 bg-white"></iframe>
+    </div>
+
+    <div class="px-6 py-4 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex justify-end space-x-3">
+      <button id="cancelPreviewBtn" class="px-5 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition">
+        Close
+      </button>
+      <button id="confirmDownloadBtn" class="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg flex items-center gap-2 shadow-md transition hover:-translate-y-0.5">
+        <span class="material-icons text-sm">download</span>
+        <span>Download Final Report</span>
+      </button>
+    </div>
+  </div>
+</div>
+
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <script src="scripts/supabase.js"></script>
