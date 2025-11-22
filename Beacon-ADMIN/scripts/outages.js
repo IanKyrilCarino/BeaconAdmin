@@ -1,528 +1,464 @@
-// ==========================
-// OUTAGES PAGE SCRIPT (v7 - Schema Update)
-// ==========================
-// Loaded LAST only on outages.html
+// ==========================================
+// OUTAGES.JS - Final (v8 - No Warping)
+// ==========================================
 
 document.addEventListener("DOMContentLoaded", () => {
+  console.log("Outages Page Script Loaded (v8 - Aspect Ratio Fix)");
 
-    // --- Essential Elements ---
-    const outagesContainer = document.getElementById("outagesContainer");
-    const emptyState = document.getElementById("emptyState");
+  // --- Global State ---
+  let allOutages = [];
+  let selectedFeeders = new Set(); 
 
-    if (!outagesContainer) {
-        console.error("CRITICAL ERROR v4.1: Outages container (#outagesContainer) not found!");
+  // --- Elements ---
+  const originalContainer = document.getElementById("outagesContainer");
+  const statusFilter = document.getElementById("statusFilter");
+  const locationSearch = document.getElementById("locationSearch");
+  const feederButtonContainer = document.getElementById("feederButtonContainer");
+
+  // --- Config ---
+  window.STATUS_COLORS = {
+    Reported: { text: "text-red-600", bg: "bg-red-50", border: "border-red-100", icon: "report" },
+    Ongoing: { text: "text-blue-600", bg: "bg-blue-50", border: "border-blue-100", icon: "engineering" },
+    Completed: { text: "text-green-600", bg: "bg-green-50", border: "border-green-100", icon: "check_circle" },
+    Default: { text: "text-gray-600", bg: "bg-gray-50", border: "border-gray-100", icon: "help" }
+  };
+
+  // --- Init ---
+  init();
+
+  async function init() {
+    if (!window.supabase) {
+        if(originalContainer) originalContainer.innerHTML = '<p class="text-red-500">Error: Supabase not connected</p>';
         return;
     }
-    if (!emptyState) {
-        console.warn("WARN v4.1: Empty state element (#emptyState) not found.");
+
+    // 1. Layout
+    setupLayoutStructure();
+
+    // 2. Filters & Data
+    generateFeederFilterButtons(); 
+    await fetchOutages();          
+    
+    // 3. Listeners
+    window.applyFilters = renderOutages; 
+    if(statusFilter) statusFilter.addEventListener("change", renderOutages);
+    if(locationSearch) locationSearch.addEventListener("input", renderOutages);
+  }
+
+  // ===================================
+  // 1. LAYOUT STRUCTURE
+  // ===================================
+  function setupLayoutStructure() {
+      if (document.getElementById('layoutWrapper')) return; 
+
+      const wrapper = document.createElement('div');
+      wrapper.id = 'layoutWrapper';
+      // 12-col grid: Feed (8) + Sidebar (4)
+      wrapper.className = 'grid grid-cols-1 lg:grid-cols-12 gap-8 items-start'; 
+
+      originalContainer.parentNode.insertBefore(wrapper, originalContainer);
+
+      // Main Feed
+      originalContainer.className = 'lg:col-span-8 space-y-6'; 
+      wrapper.appendChild(originalContainer);
+
+      // Right Sidebar
+      const sidebar = document.createElement('div');
+      sidebar.id = 'analyticsSidebar';
+      sidebar.className = 'lg:col-span-4 space-y-6 sticky top-4';
+      wrapper.appendChild(sidebar);
+  }
+
+  // ===================================
+  // 2. DATA FETCHING
+  // ===================================
+  async function fetchOutages() {
+    try {
+        const { data, error } = await supabase
+            .from('announcements')
+            .select(`*, announcement_images ( image_url )`)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        allOutages = data.map(item => {
+             const newImgs = item.announcement_images ? item.announcement_images.map(i => i.image_url) : [];
+             const oldImgs = Array.isArray(item.pictures) ? item.pictures : [];
+             return { ...item, images: [...new Set([...newImgs, ...oldImgs])] };
+        }) || [];
+
+        renderOutages();
+
+    } catch (err) {
+        console.error("Error fetching outages:", err);
+        if(window.showErrorPopup) window.showErrorPopup("Failed to load outages");
     }
+  }
 
-    // --- State Variables ---
-    let allOutages = [];
-    let currentDisplayData = [];
+  // ===================================
+  // 3. SIDEBAR ANALYTICS
+  // ===================================
+  function renderAnalytics(filteredData) {
+      const sidebar = document.getElementById('analyticsSidebar');
+      if(!sidebar) return;
 
-    // --- CONFIG ---
-    const STATUS_COLORS = {
-        Reported: { border: "border-red-500", tag: "bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100" },
-        Ongoing: { border: "border-yellow-500", tag: "bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100" },
-        Completed: { border: "border-green-500", tag: "bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100" },
-        Default: { border: "border-gray-500", tag: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300"}
-    };
-    // Expose globally for other scripts (e.g., dashboard)
-    window.STATUS_COLORS = STATUS_COLORS;
+      // Metrics
+      const activeOutages = filteredData.filter(i => i.status === 'Reported' || i.status === 'Ongoing');
+      const activeCount = activeOutages.length;
+      
+      // Top Feeder
+      const feederCounts = {};
+      filteredData.forEach(i => { if(i.feeder_id) feederCounts[i.feeder_id] = (feederCounts[i.feeder_id]||0)+1; });
+      const topFeeder = Object.keys(feederCounts).sort((a,b) => feederCounts[b] - feederCounts[a])[0] || 'None';
 
+      // Hotspot Area
+      const areaCounts = {};
+      filteredData.forEach(item => {
+          if (item.areas_affected && item.areas_affected.length > 0) {
+              item.areas_affected.forEach(area => areaCounts[area] = (areaCounts[area]||0) + 1);
+          } else if (item.location) {
+              areaCounts[item.location] = (areaCounts[item.location]||0) + 1;
+          }
+      });
+      const topArea = Object.keys(areaCounts).sort((a,b) => areaCounts[b] - areaCounts[a])[0] || 'N/A';
 
-    // ===================================
-    // DATA FETCHING (SUPABASE)
-    // ===================================
+      // Longest Active (Critical Attention)
+      let longestOutage = null;
+      let maxDuration = 0;
+      const now = new Date();
+      activeOutages.forEach(item => {
+          const duration = now - new Date(item.created_at);
+          if (duration > maxDuration) {
+              maxDuration = duration;
+              longestOutage = item;
+          }
+      });
+      
+      let criticalTimeText = '';
+      if (longestOutage) {
+          const hours = Math.floor(maxDuration / (1000 * 60 * 60));
+          criticalTimeText = `${hours} hours`;
+      }
 
-    /**
-     * Fetches all feeder data from Supabase to populate the filter.
-     */
-    async function populateFeederFilters() {
-        const container = document.getElementById("feederButtonContainer");
-        if (!container) return;
-
-        container.innerHTML = `<span classclass="col-span-3 text-xs text-gray-500">Loading feeders...</span>`;
-
-        if (!window.supabase) {
-            container.innerHTML = `<span class="col-span-3 text-xs text-red-500">Supabase error.</span>`;
-            return;
-        }
-
-        try {
-            // Assumes a 'feeders' table with 'id' and 'name'
-            const { data: feeders, error } = await supabase
-                .from('feeders')
-                .select('id, name')
-                .order('id', { ascending: true });
-
-            if (error) throw error;
-            
-            if (feeders.length === 0) {
-                container.innerHTML = `<span class="col-span-3 text-xs text-gray-500">No feeders found.</span>`;
-                return;
-            }
-
-            container.innerHTML = feeders.map(feeder => {
-                const feederName = feeder.name || `FD-${feeder.id}`;
-                return `
-                    <button class="feeder-toggle px-2 py-1 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-sm font-medium" 
-                            data-feeder="${feeder.id}">
-                        ${feederName}
-                    </button>
-                `;
-            }).join('');
-
-        } catch (error) {
-            console.error("Error fetching feeders:", error.message);
-            container.innerHTML = `<span class="col-span-3 text-xs text-red-500">Failed to load feeders.</span>`;
-        }
-    }
-
-    /**
-     * Fetches all outage data from Supabase and stores it in state.
-     */
-    async function fetchAllOutages() {
-        if (!window.supabase) {
-            console.error("Supabase client not found.");
-            return;
-        }
-        
-        outagesContainer.innerHTML = `<p class="text-center text-gray-500">Loading outages...</p>`;
-        emptyState?.classList.add('hidden');
-
-        try {
-            // =================================================================
-            // ✅ MODIFICATION: Updated query to fetch from announcement_images
-            // =================================================================
-            const { data, error } = await supabase
-                .from('announcements')
-                .select(`
-                    *,
-                    title:location,
-                    eta:estimated_restoration_at,
-                    affected_areas:areas_affected,
-                    announcement_images ( id, image_url )
-                `)
-                .order('created_at', { ascending: false });
-            // =================================================================
-            // ✅ END MODIFICATION
-            // =================================================================
-
-            if (error) throw error;
-
-            // =================================================================
-            // ✅ MODIFICATION: Map data to create the `images` array
-            // The rest of the script (renderers) expects `outage.images`
-            // to be a simple array of URLs.
-            // =================================================================
-            allOutages = data ? data.map(outage => {
-                // Get URLs from the new related table
-                const newImageUrls = outage.announcement_images 
-                    ? outage.announcement_images.map(img => img.image_url) 
-                    : [];
-                
-                // Fallback for any URLs still in the old 'pictures' or 'picture' columns
-                const oldImageUrls = Array.isArray(outage.pictures) ? outage.pictures : [];
-                const singleImageUrl = outage.picture ? [outage.picture] : [];
-                
-                // Combine all and remove duplicates
-                const allImageUrls = [
-                    ...new Set([
-                        ...newImageUrls, 
-                        ...oldImageUrls, 
-                        ...singleImageUrl
-                    ])
-                ];
-
-                return {
-                    ...outage,
-                    images: allImageUrls // This `images` property is used by render functions
-                };
-            }) : [];
-            // =================================================================
-            // ✅ END MODIFICATION
-            // =================================================================
-
-
-        } catch (error) {
-            console.error("Error fetching outages:", error.message);
-            outagesContainer.innerHTML = `<p class="text-center text-red-500">Failed to load outages: ${error.message}</p>`;
-        }
-    }
-
-    // ===================================
-    // INITIALIZATION
-    // ===================================
-    async function init() {
-        // Connect filter functions to shared.js
-        window.filterOutages = applyFiltersAndRender;
-        window.applyFilters = applyFiltersAndRender;
-        
-        // Provide data access for shared.js modal
-        window.getOutages = () => allOutages;
-
-        // Page-specific Status filter listener
-        const statusFilterElem = document.getElementById("statusFilter");
-        statusFilterElem?.addEventListener('change', applyFiltersAndRender);
-
-        attachPostEventListeners();
-        
-        // Fetch data from Supabase
-        await populateFeederFilters();
-        await fetchAllOutages();
-        
-        // Render initial view
-        applyFiltersAndRender();
-    }
-
-    // ===================================
-    // FILTERING LOGIC
-    // ===================================
-    function applyFiltersAndRender() {
-        const feederPopup = document.getElementById("feederPopup");
-        const searchInput = document.getElementById("locationSearch");
-        const statusFilter = document.getElementById("statusFilter");
-
-        const selectedFeederToggles = feederPopup?.querySelectorAll(".feeder-toggle.bg-blue-500") || [];
-        const selectedFeeders = Array.from(selectedFeederToggles).map(btn => btn.dataset.feeder);
-        const showAllFeeders = selectedFeeders.length === 0;
-        const searchTerm = searchInput?.value.toLowerCase() || '';
-        const selectedStatus = statusFilter?.value || 'all';
-
-        currentDisplayData = allOutages.filter(outage => {
-            const feederIdString = String(outage.feeder_id);
-            const feederMatch = showAllFeeders || selectedFeeders.includes(feederIdString);
-            const statusMatch = (selectedStatus === 'all') || (outage.status === selectedStatus);
-            
-            // 'outage.title' is now correctly mapped from the 'location' column
-            // 'outage.affected_areas' is now correctly mapped from the 'areas_affected' column
-            const searchableText = [
-                outage.title || '', // This is now outage.location
-                outage.description || '',
-                ...(outage.affected_areas || []) // This is now outage.areas_affected
-            ].join(' ').toLowerCase();
-            
-            const searchMatch = (searchTerm === '') || searchableText.includes(searchTerm);
-            return feederMatch && statusMatch && searchMatch;
-        });
-
-        renderPosts(currentDisplayData);
-    }
-
-    // Make applyFiltersAndRender globally available
-    window.applyFiltersAndRender = applyFiltersAndRender;
-
-    // ===================================
-    // RENDERING FUNCTIONS
-    // ===================================
-    function renderPosts(outagesToRender) {
-        if (!outagesContainer) return;
-        if (!Array.isArray(outagesToRender)) { return; }
-
-        if (outagesToRender.length === 0) {
-            outagesContainer.innerHTML = '';
-            emptyState?.classList.remove('hidden');
-        } else {
-            emptyState?.classList.add('hidden');
-            let postsHTML = '';
-            try {
-                postsHTML = outagesToRender.map((outage, index) => {
-                    try {
-                        return renderSinglePostCard(outage);
-                    } catch (cardError) {
-                        console.error(`ERROR rendering card for outage ID ${outage?.id} (index ${index})`, cardError, outage);
-                        return `<div class="p-4 bg-red-100 text-red-700 rounded shadow">Error rendering post ID ${outage?.id || 'Unknown'}. See console.</div>`;
-                    }
-                }).join('');
-                outagesContainer.innerHTML = postsHTML;
-            } catch (error) {
-                console.error("CRITICAL ERROR during .map() or .join()", error);
-                outagesContainer.innerHTML = '<p class="text-red-500">Critical error rendering posts list. Check console.</p>';
-            }
-        }
-    }
-
-
-    function renderSinglePostCard(outage) {
-        if (typeof outage !== 'object' || outage === null) { outage = {}; }
-        const status = outage.status || 'Unknown';
-        const statusConfig = STATUS_COLORS[status] || STATUS_COLORS.Default;
-
-        const eta = outage.eta ? new Date(outage.eta).toLocaleString() : "To be determined";
-        const createdDate = outage.created_at ? new Date(outage.created_at).toLocaleString() : "N/A";
-        const hasCoords = outage.latitude && outage.longitude;
-        const coordsText = hasCoords ? `${Number(outage.latitude).toFixed(4)}, ${Number(outage.longitude).toFixed(4)}` : 'N/A';
-        const outageType = outage.type === 'scheduled' ? 'Scheduled' : 'Unscheduled';
-
-        // Handle images dynamically: show full image without cropping
-        // This code works AS-IS because `fetchAllOutages` now correctly
-        // populates `outage.images` as an array of URLs.
-        const hasImages = Array.isArray(outage.images) && outage.images.length > 0;
-        const imageHTML = hasImages ? `
-            <div class="w-full mb-4">
-                <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Pictures</label>
-                <div class="w-full overflow-hidden rounded-md">
-                    ${outage.images.map((img, idx) => `
-                        <img src="${img || ''}" alt="Outage image ${idx+1}" 
-                            class="w-full h-auto rounded-md mb-2">
-                    `).join('')}
+      sidebar.innerHTML = `
+        <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
+            <div class="flex justify-between items-start">
+                <div>
+                    <h4 class="text-xs font-bold uppercase tracking-wider text-gray-500">System Status</h4>
+                    <p class="text-4xl font-black text-gray-800 dark:text-white mt-2">${activeCount}</p>
+                    <p class="text-sm text-gray-500">Active Incidents</p>
+                </div>
+                <div class="text-right">
+                    <span class="h-3 w-3 rounded-full ${activeCount > 0 ? 'bg-red-500 animate-pulse' : 'bg-green-500'} inline-block"></span>
+                    <p class="text-xl font-bold text-gray-800 dark:text-white mt-3">F-${topFeeder}</p>
+                    <p class="text-xs text-gray-500">Top Feeder</p>
                 </div>
             </div>
-        ` : '';
+        </div>
 
-        // Show only the first affected area
-        let affectedAreaText = 'N/A';
-        if (Array.isArray(outage.affected_areas) && outage.affected_areas.length > 0) {
-            affectedAreaText = outage.affected_areas[0];
-            if (outage.affected_areas.length > 1) {
-                affectedAreaText += ` (+${outage.affected_areas.length - 1} more)`;
-            }
+        ${longestOutage ? `
+        <div class="bg-red-50 dark:bg-red-900/20 rounded-2xl p-6 shadow-sm border border-red-100 dark:border-red-800/50 relative overflow-hidden">
+            <div class="flex items-center gap-2 mb-2 text-red-600 dark:text-red-400">
+                <span class="material-icons text-sm">priority_high</span>
+                <h4 class="text-xs font-bold uppercase tracking-wider">Attention Needed</h4>
+            </div>
+            <p class="font-bold text-gray-800 dark:text-white line-clamp-1">${longestOutage.location}</p>
+            <div class="flex items-center gap-2 mt-2">
+                <span class="text-3xl font-black text-red-600 dark:text-red-400">${criticalTimeText}</span>
+                <span class="text-xs text-red-400 font-medium">unresolved</span>
+            </div>
+            <button class="mt-4 text-xs font-bold text-red-600 hover:underline view-critical-btn" data-id="${longestOutage.id}">View Incident &rarr;</button>
+            <span class="material-icons absolute -right-4 -bottom-4 text-[6rem] text-red-500 opacity-5">timer</span>
+        </div>` : ''}
+
+        <div class="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-sm border border-gray-100 dark:border-gray-700">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Hotspot Area</h4>
+            <div class="flex items-center gap-3">
+                <span class="material-icons text-orange-500">place</span>
+                <div>
+                    <p class="font-bold text-gray-800 dark:text-white text-lg">${topArea}</p>
+                    <p class="text-xs text-gray-400">Most active reports</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="bg-blue-50 dark:bg-blue-900/10 rounded-2xl p-6 border border-blue-100 dark:border-blue-800/30">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-2">AI Suggestion</h4>
+            <p class="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
+                ${activeCount > 0 ? `Focus dispatch teams on <strong>${topArea}</strong> (Feeder ${topFeeder}) to maximize restoration impact.` : 'Grid status is nominal.'}
+            </p>
+        </div>
+      `;
+
+      const critBtn = sidebar.querySelector('.view-critical-btn');
+      if(critBtn) critBtn.addEventListener('click', () => window.showUpdateModal([critBtn.dataset.id], 'outages'));
+  }
+
+  // ===================================
+  // 4. MAIN FEED RENDER (Fixed Images)
+  // ===================================
+  function renderOutages() {
+    if(!originalContainer) return;
+    originalContainer.innerHTML = "";
+    
+    const searchTerm = locationSearch ? locationSearch.value.toLowerCase() : '';
+    const statusTerm = statusFilter ? statusFilter.value : 'all';
+    
+    const filtered = allOutages.filter(item => {
+        if (statusTerm !== 'all' && item.status !== statusTerm) return false;
+        if (selectedFeeders.size > 0 && (!item.feeder_id || !selectedFeeders.has(parseInt(item.feeder_id)))) return false;
+        const textMatch = (
+            (item.location && item.location.toLowerCase().includes(searchTerm)) ||
+            (item.cause && item.cause.toLowerCase().includes(searchTerm))
+        );
+        return !searchTerm || textMatch;
+    });
+
+    renderAnalytics(filtered);
+
+    if (filtered.length === 0) {
+        originalContainer.innerHTML = `
+            <div class="bg-white dark:bg-gray-800 rounded-2xl p-12 text-center border border-dashed border-gray-300 dark:border-gray-700">
+                <span class="material-icons text-4xl text-gray-300 mb-2">feed</span>
+                <p class="text-gray-500 font-medium">No active posts.</p>
+            </div>
+        `;
+        return;
+    }
+
+    let html = '';
+    filtered.forEach(item => {
+        const config = window.STATUS_COLORS[item.status] || window.STATUS_COLORS.Default;
+        const dateObj = new Date(item.created_at);
+        const dateStr = dateObj.toLocaleString('en-US', { weekday: 'short', month:'short', day:'numeric', hour: 'numeric', minute:'numeric', hour12: true });
+        
+        const headerTitle = `
+            <span class="font-bold text-gray-900 dark:text-white text-lg">${item.cause || 'Outage'}</span> 
+            <span class="text-gray-400 font-normal mx-1 text-sm">at</span> 
+            <span class="font-bold text-gray-900 dark:text-white text-lg">${item.location || 'Unknown Area'}</span>
+        `;
+
+        // FIX: Use 'w-full h-auto' to respect aspect ratio and prevent warping
+        let imagesHtml = '';
+        if (item.images && item.images.length > 0) {
+            imagesHtml = `
+                <div class="w-full mt-4 bg-gray-100 dark:bg-gray-900 rounded-xl overflow-hidden border border-gray-100 dark:border-gray-700 relative group-image">
+                    <img src="${item.images[0]}" class="w-full h-auto max-h-[500px] object-contain bg-gray-50 dark:bg-gray-800 cursor-pointer view-image-trigger" data-src="${item.images[0]}">
+                    ${item.images.length > 1 ? 
+                        `<div class="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-lg font-bold backdrop-blur-sm pointer-events-none">
+                            +${item.images.length - 1} photos
+                        </div>` : ''}
+                </div>
+            `;
         }
 
-        return `
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md border-t-4 ${statusConfig.border} w-[650px] mx-auto mb-6 p-4 flex flex-col">
-            <div class="flex justify-between items-center flex-wrap gap-2 mb-2">
-                <h3 class="text-xl font-semibold text-gray-900 dark:text-white">
-                    ${outage.cause ? outage.cause : 'Outage Report'}${outage.location ? ` at ${outage.location}` : ''}
-                </h3>
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${statusConfig.tag} flex-shrink-0">${status}</span>
-            </div>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mb-2">Feeder ${outage.feeder_id || 'N/A'} | ${outageType}</p>
+        html += `
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden hover:shadow-md transition-shadow cursor-pointer outage-card-trigger" data-id="${item.id}">
             
-            <p class="text-gray-700 dark:text-gray-300 mb-4">${outage.description || 'No description provided.'}</p>
+            <div class="p-5 pb-2 flex justify-between items-start">
+                <div class="flex items-start gap-3">
+                    <div class="w-10 h-10 rounded-full ${config.bg} ${config.text} flex items-center justify-center shrink-0 mt-1">
+                        <span class="material-icons text-xl">${config.icon}</span>
+                    </div>
+                    <div>
+                        <h3 class="leading-tight">${headerTitle}</h3>
+                        <div class="flex items-center gap-2 mt-1">
+                             <span class="text-xs font-bold uppercase tracking-wide ${config.text}">${item.status}</span>
+                             <span class="text-gray-300">•</span>
+                             <p class="text-sm text-gray-500 dark:text-gray-400">${dateStr}</p>
+                        </div>
+                    </div>
+                </div>
 
-            ${imageHTML}
-
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t dark:border-gray-700">
-                <div>
-                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400">Affected Area</label>
-                    <p class="text-sm text-gray-800 dark:text-gray-200">${affectedAreaText}</p>
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400">ETA</label>
-                    <p class="text-sm font-bold text-blue-600 dark:text-blue-400">${eta}</p>
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-gray-500 dark:text-gray-400">Coordinates</label>
-                    ${hasCoords ? `<div class="flex items-center space-x-1">
-                        <span class="text-sm text-gray-800 dark:text-gray-200">${coordsText}</span>
-                        <button type="button" class="text-blue-600 dark:text-blue-400 hover:underline copy-coords-btn" data-coords="${coordsText}">
-                            <span class="material-icons text-sm">content_copy</span>
-                        </button>
-                    </div>` : '<p class="text-sm text-gray-500 dark:text-gray-400">N/A</p>'}
-                </div>
+                ${item.feeder_id ? `
+                <div class="text-right pl-4">
+                    <span class="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">FEEDER</span>
+                    <span class="text-3xl font-black text-gray-300 dark:text-gray-600 leading-none">0${item.feeder_id}</span>
+                </div>` : ''}
             </div>
 
-            <div class="flex justify-end space-x-2 mt-4">
-                <button type="button" class="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-100 rounded-full hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-300 dark:hover:bg-blue-800 transition view-details-btn" data-id="${outage.id || ''}">Details</button>
-                <button type="button" class="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-full hover:bg-blue-700 transition update-item-btn" data-id="${outage.id || ''}">Update</button>
+            <div class="px-5 pb-2">
+                ${item.description ? `<p class="text-gray-600 dark:text-gray-300 text-sm leading-relaxed mt-2">${item.description}</p>` : ''}
+                ${imagesHtml}
+            </div>
+
+            <div class="px-5 py-3 bg-gray-50 dark:bg-gray-900/30 border-t dark:border-gray-700 flex gap-3 mt-2">
+                <button class="flex-1 py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-bold hover:bg-gray-50 transition outage-card-trigger" data-id="${item.id}">
+                    View Details
+                </button>
+                <button class="flex-1 py-2 rounded-lg bg-blue-600 text-white text-sm font-bold hover:bg-blue-700 transition update-btn" data-id="${item.id}">
+                    Manage
+                </button>
             </div>
         </div>
         `;
-    }
+    });
+    
+    originalContainer.innerHTML = html;
+    setupEventDelegation();
+  }
 
+  // ===================================
+  // 5. EVENTS & MODALS
+  // ===================================
+  function setupEventDelegation() {
+    if (!originalContainer) return;
 
-    // ===================================
-    // MODALS & ACTIONS (Updated for Unified Modal System)
-    // ===================================
+    originalContainer.addEventListener('click', (e) => {
+        const target = e.target;
 
-    // --- Helper Functions ---
-    function handleCopyCoords(e) {
-        const btn = e.target.closest('.copy-coords-btn');
-        if (!btn) return;
-        const coords = btn.dataset.coords;
-        if (!coords || coords === 'N/A') return;
-
-        // Use document.execCommand for simple clipboard access in iFrames
-        try {
-            const tempInput = document.createElement("textarea");
-            tempInput.style.position = "absolute";
-            tempInput.style.left = "-9999px";
-            tempInput.value = coords;
-            document.body.appendChild(tempInput);
-            tempInput.select();
-            document.execCommand("copy");
-            document.body.removeChild(tempInput);
-            
-            window.showSuccessPopup("Coordinates Copied!");
-            const originalHTML = btn.innerHTML;
-            btn.innerHTML = '<span class="material-icons text-sm text-green-600">check</span>';
-            setTimeout(() => { if (btn && btn.parentNode) btn.innerHTML = originalHTML; }, 2000);
-        } catch (err) {
-            console.error('Failed to copy coordinates:', err);
-            window.showErrorPopup("Failed to copy. See console.");
+        // Update
+        const updateBtn = target.closest('.update-btn');
+        if (updateBtn) {
+            e.stopPropagation();
+            window.showUpdateModal([updateBtn.dataset.id], 'outages');
+            return;
         }
-    }
 
-    function hasCoords(outage) { 
-        return outage && typeof outage.latitude === 'number' && typeof outage.longitude === 'number'; 
-    }
+        // Image
+        const imgTrigger = target.closest('.view-image-trigger');
+        if (imgTrigger) {
+            e.stopPropagation();
+            showImageModal(imgTrigger.dataset.src);
+            return;
+        }
 
-    function showImageModal(imageUrl) {
-        const modal = document.createElement('div');
-        modal.className = 'fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[9999] p-4';
-        modal.addEventListener('click', () => modal.remove());
-        modal.innerHTML = `
-          <div class="relative max-w-3xl max-h-[90vh]">
-            <button type="button" class="absolute -top-10 right-0 text-white text-3xl font-bold">&times;</button>
-            <img src="${imageUrl || ''}" class="w-full h-auto object-contain max-h-[90vh] rounded-lg">
-          </div>`;
-        document.body.appendChild(modal);
-    }
+        // Details
+        const card = target.closest('.outage-card-trigger');
+        if (card) {
+            if (window.getSelection().toString().length > 0) return;
+            showDetailsModal(parseInt(card.dataset.id));
+        }
+    });
+  }
 
-    // --- Event Listener Setup ---
-    function attachPostEventListeners() {
-        outagesContainer.addEventListener('click', (e) => {
-            const btn = e.target.closest('button, img');
-            if (!btn) return;
-            if (btn.classList.contains('copy-coords-btn')) { 
-                handleCopyCoords(e); 
-                return; 
-            }
-            if (btn.classList.contains('view-images-btn')) {
-                const imageUrl = btn.dataset.src || btn.src;
-                if(imageUrl) showImageModal(imageUrl);
-                return;
-            }
-            const outageId = btn.dataset.id;
-            if (!outageId) return;
-            const id = parseInt(outageId);
-            if (isNaN(id)) { 
-                console.error("Invalid outage ID:", outageId); 
-                return; 
-            }
+  function showImageModal(url) {
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center z-[9999] p-4 cursor-zoom-out';
+      modal.innerHTML = `<img src="${url}" class="max-w-full max-h-full rounded shadow-2xl">`;
+      modal.onclick = () => modal.remove();
+      document.body.appendChild(modal);
+  }
 
-            if (btn.classList.contains('view-details-btn')) {
-                showIndividualDetails(id);
-            } else if (btn.classList.contains('update-item-btn')) {
-                // Use unified modal system
-                // This is consistent with shared.js
-                window.showUpdateModal([id], 'outages');
-            }
-        });
-    }
-// --- Show Details Modal ---
-function showIndividualDetails(outageId) {
-    // This function works AS-IS because `fetchAllOutages`
-    // correctly populates `allOutages` with the `images` array.
+  function showDetailsModal(outageId) {
     const outage = allOutages.find(o => o.id === outageId);
-    if (!outage) {
-        console.error("Outage not found for ID:", outageId);
-        return;
+    if (!outage) return;
+
+    const config = window.STATUS_COLORS[outage.status] || window.STATUS_COLORS.Default;
+    
+    let areasHtml = '<span class="text-gray-400 italic">No specific areas listed</span>';
+    if (outage.areas_affected && outage.areas_affected.length > 0) {
+        areasHtml = outage.areas_affected.map(area => `<span class="px-3 py-1 bg-gray-100 dark:bg-gray-700 rounded-full text-xs font-medium border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300">${area}</span>`).join('');
     }
-
-    const coordsText = hasCoords(outage) ? `${outage.latitude.toFixed(4)}, ${outage.longitude.toFixed(4)}` : 'N/A';
-    const statusConfig = STATUS_COLORS[outage.status] || STATUS_COLORS.Default;
-
-    const eta = outage.eta ? new Date(outage.eta).toLocaleString() : "To be determined";
-    const createdDate = outage.created_at ? new Date(outage.created_at).toLocaleString() : 'N/A';
-
-    const hasImages = Array.isArray(outage.images) && outage.images.length > 0;
 
     const modal = document.createElement('div');
-    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4';
+    modal.className = 'fixed inset-0 bg-gray-900/80 backdrop-blur-sm flex items-center justify-center z-[9999] p-4';
+    
     modal.innerHTML = `
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
-          <div class="w-full h-2 ${statusConfig.border}"></div>
-
-          <div class="flex justify-between items-start p-6 border-b dark:border-gray-700">
-            <div>
-              <h3 class="text-xl font-semibold text-gray-900 dark:text-white">${outage.cause || 'Outage'}${outage.location ? ' at ' + outage.location : ''}</h3>
-              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Reported At: ${createdDate}</p>
-            </div>
-            <button type="button" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 close-modal">
-              <span class="material-icons">close</span>
-            </button>
-          </div>
-
-          <div class="p-6 space-y-4 overflow-y-auto">
-            ${hasImages ? `
-            <div class="w-full flex justify-center bg-white dark:bg-gray-800 rounded-lg p-4 shadow mb-4">
-              <div class="relative w-full max-w-2xl h-64 md:h-96 overflow-hidden rounded-lg">
-                ${outage.images.map((img, idx) => `
-                  <img src="${img}" alt="Outage image ${idx+1}" class="absolute top-0 left-0 w-full h-full object-contain transition-opacity duration-500 ${idx === 0 ? 'opacity-100' : 'opacity-0'} carousel-image" data-index="${idx}">
-                `).join('')}
-                <button type="button" class="absolute top-1/2 left-2 -translate-y-1/2 bg-gray-200 dark:bg-gray-700 bg-opacity-50 rounded-full px-2 py-1 carousel-prev">
-                  <span class="material-icons text-sm">chevron_left</span>
-                </button>
-                <button type="button" class="absolute top-1/2 right-2 -translate-y-1/2 bg-gray-200 dark:bg-gray-700 bg-opacity-50 rounded-full px-2 py-1 carousel-next">
-                  <span class="material-icons text-sm">chevron_right</span>
-                </button>
-              </div>
-            </div>` : ''}
-
-            <div class="grid grid-cols-3 gap-4 text-sm font-medium">
-              <div>Status: <span class="${statusConfig.tag} px-2 py-0.5 rounded">${outage.status || 'N/A'}</span></div>
-              <div>Feeder: ${outage.feeder_id || 'N/A'}</div>
-              <div>Type: ${outage.type === 'scheduled' ? 'Scheduled' : 'Unscheduled'}</div>
-            </div>
-
-            <div class="bg-gray-100 dark:bg-gray-700 p-4 rounded-xl">
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
-              <p class="text-gray-900 dark:text-white">${outage.description || 'No description provided.'}</p>
-            </div>
-
-            <div class="flex items-center gap-2 text-sm font-medium cursor-pointer affected-areas-toggle">
-              <span class="text-gray-900 dark:text-white">Affected Areas</span>
-              <span class="material-icons text-base transition-transform duration-200">expand_more</span>
-            </div>
-            <div class="mt-2 flex flex-wrap gap-2 affected-areas-content hidden"></div>
-
-            <div class="grid grid-cols-2 gap-4 text-sm font-medium mt-4">
-              <div>ETA: ${eta}</div>
-              <div>Coordinates: ${coordsText}</div>
-            </div>
-          </div>
-
-          <div class="flex justify-end space-x-3 p-6 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-            <button type="button" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition close-modal">Close</Same</button>
-            <button type="button" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition update-from-details" data-id="${outage.id}">Update</button>
-          </div>
+      <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-scale-up">
+        
+        <div class="p-6 border-b dark:border-gray-700 flex justify-between items-start">
+           <div class="flex gap-4">
+               <div class="w-12 h-12 rounded-full ${config.bg} ${config.text} flex items-center justify-center">
+                   <span class="material-icons text-2xl">${config.icon}</span>
+               </div>
+               <div>
+                   <h2 class="text-xl font-bold text-gray-900 dark:text-white leading-tight">${outage.cause || 'Outage'}</h2>
+                   <p class="text-sm text-gray-500">at ${outage.location}</p>
+               </div>
+           </div>
+           <button class="close-modal w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500"><span class="material-icons">close</span></button>
         </div>
+
+        <div class="p-6 overflow-y-auto space-y-6">
+           <div class="grid grid-cols-3 gap-4 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-100 dark:border-gray-700">
+               <div>
+                   <p class="text-xs text-gray-400 uppercase font-bold">Status</p>
+                   <p class="font-medium ${config.text}">${outage.status}</p>
+               </div>
+               <div>
+                   <p class="text-xs text-gray-400 uppercase font-bold">Type</p>
+                   <p class="font-medium text-gray-700 dark:text-gray-300">${outage.type}</p>
+               </div>
+               <div>
+                   <p class="text-xs text-gray-400 uppercase font-bold">ETA</p>
+                   <p class="font-medium text-blue-600">${outage.estimated_restoration_at ? new Date(outage.estimated_restoration_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : 'TBD'}</p>
+               </div>
+           </div>
+
+           <div>
+               <h4 class="text-sm font-bold text-gray-900 dark:text-white mb-2">Description</h4>
+               <p class="text-gray-600 dark:text-gray-300 text-sm leading-relaxed">${outage.description || 'No description.'}</p>
+           </div>
+
+           <div>
+               <h4 class="text-sm font-bold text-gray-900 dark:text-white mb-2">Affected Areas</h4>
+               <div class="flex flex-wrap gap-2">${areasHtml}</div>
+           </div>
+
+           ${outage.images && outage.images.length > 0 ? `
+           <div>
+               <h4 class="text-sm font-bold text-gray-900 dark:text-white mb-2">Images</h4>
+               <div class="grid grid-cols-2 gap-2">
+                  ${outage.images.map(url => `<img src="${url}" class="w-full h-auto max-h-64 object-contain bg-gray-50 rounded-lg border cursor-pointer hover:opacity-90" onclick="window.open('${url}')">`).join('')}
+               </div>
+           </div>` : ''}
+        </div>
+        
+        <div class="p-4 bg-gray-50 dark:bg-gray-900 border-t dark:border-gray-700 flex justify-end gap-3">
+             <button class="close-modal px-4 py-2 rounded-lg text-gray-500 font-bold hover:bg-gray-200 transition">Close</button>
+             <button class="update-from-modal px-6 py-2 bg-blue-600 text-white rounded-lg font-bold shadow hover:bg-blue-700 transition">Update Status</button>
+        </div>
+      </div>
     `;
     document.body.appendChild(modal);
 
-    // CLOSE MODAL
-    modal.querySelectorAll('.close-modal').forEach(btn =>
-        btn.addEventListener('click', () => modal.remove())
-    );
-
-    // UPDATE BUTTON
-    modal.querySelector('.update-from-details').addEventListener('click', function () {
+    // Force Close Listeners
+    modal.querySelectorAll('.close-modal').forEach(b => b.addEventListener('click', () => modal.remove()));
+    
+    modal.querySelector('.update-from-modal').onclick = () => {
         modal.remove();
-        // This correctly calls the unified modal from shared.js
         window.showUpdateModal([outageId], 'outages');
+    };
+  }
+
+  // ===================================
+  // 6. FILTERS
+  // ===================================
+  function generateFeederFilterButtons() {
+    if(!feederButtonContainer) return;
+    feederButtonContainer.innerHTML = '';
+    for (let i = 1; i <= 14; i++) {
+        const btn = document.createElement("button");
+        btn.className = "feeder-toggle px-3 py-2 text-xs font-bold rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-gray-600 hover:text-blue-600 transition border border-gray-200 dark:border-gray-600";
+        btn.textContent = `F-${i}`;
+        btn.addEventListener("click", (e) => {
+             e.stopPropagation(); 
+             const isActive = btn.classList.contains("bg-blue-600");
+             if(isActive) {
+                 btn.className = "feeder-toggle px-3 py-2 text-xs font-bold rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-gray-600 hover:text-blue-600 transition border border-gray-200 dark:border-gray-600";
+                 selectedFeeders.delete(i);
+             } else {
+                 btn.className = "feeder-toggle px-3 py-2 text-xs font-bold rounded-lg bg-blue-600 text-white border-blue-600 shadow-md transform scale-105 transition";
+                 selectedFeeders.add(i);
+             }
+             renderOutages();
+        });
+        feederButtonContainer.appendChild(btn);
+    }
+    
+    const clearBtn = document.getElementById('feederClearAll');
+    if(clearBtn) clearBtn.addEventListener('click', () => {
+        selectedFeeders.clear();
+        document.querySelectorAll('.feeder-toggle').forEach(b => b.className = "feeder-toggle px-3 py-2 text-xs font-bold rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-blue-50 dark:hover:bg-gray-600 hover:text-blue-600 transition border border-gray-200 dark:border-gray-600");
+        renderOutages();
     });
 
-    // AFFECTED AREAS DROPDOWN LOGIC
-    const toggle = modal.querySelector('.affected-areas-toggle');
-    const content = modal.querySelector('.affected-areas-content');
-    const arrowIcon = toggle.querySelector('.material-icons');
-    let isOpen = false;
-
-    toggle.addEventListener('click', () => {
-        if (!isOpen) {
-            content.innerHTML = (Array.isArray(outage.affected_areas) ? outage.affected_areas : []).map(area => `
-                <span class="inline-block bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-white rounded-full px-3 py-1 text-xs">${area}</span>
-            `).join('');
-            content.classList.remove('hidden');
-            arrowIcon.classList.add('rotate-180');
-        } else {
-            content.classList.add('hidden');
-            arrowIcon.classList.remove('rotate-180');
-        }
-        isOpen = !isOpen;
+    const selectAllBtn = document.getElementById('feederSelectAll');
+    if(selectAllBtn) selectAllBtn.addEventListener('click', () => {
+        for(let i=1; i<=14; i++) selectedFeeders.add(i);
+        document.querySelectorAll('.feeder-toggle').forEach(b => b.className = "feeder-toggle px-3 py-2 text-xs font-bold rounded-lg bg-blue-600 text-white border-blue-600 shadow-md transform scale-105 transition");
+        renderOutages();
     });
-
-    // IMAGE CAROUSEL POPUP
-    modal.querySelectorAll('.view-popup-image').forEach(img =>
-        img.addEventListener('click', () => showImageModal(img.src))
-    );
-}
-
-    // --- Start ---
-    init();
-
-}); // End DOMContentLoaded
+  }
+});

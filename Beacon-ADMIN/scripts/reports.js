@@ -363,38 +363,78 @@ document.addEventListener("DOMContentLoaded", () => {
   // ===================================
 
   function createFeederTiles() {
+      // Initial loading state
+      feederTilesContainer.innerHTML = '<div class="col-span-full text-center text-gray-400 py-12 animate-pulse">Loading Feeder Infrastructure...</div>';
+    }
+
+  function updateFeederTilesUI() {
     let tilesHTML = "";
-    for (let i = 1; i <= 14; i++) {
+
+    for (let feederId = 1; feederId <= 14; feederId++) {
+      // Get data from aggregated state or default to 0
+      const data = allFeederData[feederId] || { reportCount: 0 };
+      const count = data.reportCount;
+      const hasOutages = count > 0;
+
+      // --- DYNAMIC STYLING LOGIC ---
+      const statusColor = hasOutages ? 'bg-red-500' : 'bg-blue-500';
+      const hoverColor = hasOutages ? 'group-hover:bg-red-600' : 'group-hover:bg-blue-600';
+      
+      // Badge Pill Style
+      const badgeStyle = hasOutages 
+        ? 'bg-red-50 text-red-600 border-red-100 dark:bg-red-900/20 dark:text-red-400 dark:border-red-800/30' 
+        : 'bg-gray-50 text-gray-500 border-gray-100 dark:bg-gray-700/30 dark:text-gray-400 dark:border-gray-600';
+      
+      // Ping Animation for active outages
+      const pingAnimation = hasOutages 
+        ? `<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>` 
+        : '';
+      
+      const dotColor = hasOutages ? 'bg-red-500' : 'bg-gray-400';
+      
+      // Format ID (e.g., "01" instead of "1")
+      const formattedId = feederId < 10 ? '0' + feederId : feederId;
+
+      // --- NEW CARD HTML ---
       tilesHTML += `
-        <div class="relative bg-white dark:bg-gray-800 p-6 rounded-xl shadow-md hover:-translate-y-2 hover:scale-[1.03] hover:shadow-xl dark:hover:shadow-gray-900/50 cursor-pointer transition feeder-tile" data-feeder-id="${i}">
-          <div id="feeder-color-${i}" class="absolute top-0 left-0 w-full h-2 bg-green-500 rounded-t-xl"></div>
-          <div class="flex justify-between items-center mt-2">
-            <h3 class="text-gray-700 dark:text-gray-200 font-semibold text-lg">Feeder ${i}</h3>
+        <div class="group relative overflow-hidden rounded-2xl bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer h-40 w-full feeder-tile"
+             data-feeder-id="${feederId}">
+          
+          <div class="absolute left-0 top-0 bottom-0 w-1.5 ${statusColor} group-hover:w-3 transition-all duration-300"></div>
+
+          <div class="h-full px-6 py-5 pl-8 flex flex-col justify-between relative z-10">
+             
+             <div class="flex justify-between items-start">
+                <div>
+                   <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Substation Area</p>
+                   <h3 class="text-2xl font-bold text-gray-800 dark:text-white tracking-tight">Feeder ${feederId}</h3>
+                </div>
+                
+                <div class="w-10 h-10 rounded-xl bg-gray-50 dark:bg-gray-700/50 flex items-center justify-center text-gray-400 ${hoverColor} group-hover:text-white transition-all duration-300 shadow-inner">
+                   <span class="material-icons">bolt</span>
+                </div>
+             </div>
+
+             <div class="flex items-center justify-between mt-auto">
+                <div class="px-3 py-1.5 rounded-lg border ${badgeStyle} text-xs font-bold flex items-center gap-2">
+                   <span class="relative flex h-2.5 w-2.5">
+                     ${pingAnimation}
+                     <span class="relative inline-flex rounded-full h-2.5 w-2.5 ${dotColor}"></span>
+                   </span>
+                   <span>${count} Pending</span>
+                </div>
+                
+                <span class="material-icons text-gray-300 group-hover:text-blue-500 group-hover:translate-x-2 transition-transform duration-300 text-lg">arrow_forward</span>
+             </div>
           </div>
-          <p id="value-feeder-${i}" class="text-3xl font-bold text-green-600 mt-4">0</p>
-          <p class="text-gray-500 dark:text-gray-400 text-sm mt-1">Pending Reports</p>
+
+          <div class="absolute -right-4 -bottom-8 text-[6rem] font-black text-gray-50 dark:text-gray-700/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none select-none leading-none z-0">
+             ${formattedId}
+          </div>
         </div>
       `;
     }
     feederTilesContainer.innerHTML = tilesHTML;
-  }
-
-  function updateFeederTilesUI() {
-    for (let feederId = 1; feederId <= 14; feederId++) {
-      const data = allFeederData[feederId];
-      if (!data) continue;
-      
-      const statusColor = (data.reportCount > 0) ? STATUS_COLORS.PENDING : STATUS_COLORS.Completed;
-
-      const colorBar = document.getElementById(`feeder-color-${feederId}`);
-      const valueText = document.getElementById(`value-feeder-${feederId}`);
-
-      if (colorBar && valueText) {
-        valueText.textContent = data.reportCount;
-        colorBar.className = `absolute top-0 left-0 w-full h-2 ${statusColor.primary} rounded-t-xl`;
-        valueText.className = `text-3xl font-bold ${statusColor.value} mt-4`;
-      }
-    }
   }
 
   function updateTableHeaders() {
