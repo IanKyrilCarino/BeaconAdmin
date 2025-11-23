@@ -32,17 +32,37 @@ const greenMaterialIcon = L.divIcon({
     popupAnchor: [0, -38]
 });
 
+const grayMaterialIcon = L.divIcon({
+    html: createMaterialIconHTML('place', 'gray'),
+    className: 'leaflet-div-icon-material',
+    iconSize: [36, 36],
+    iconAnchor: [18, 36],
+    popupAnchor: [0, -38]
+});
+
+const blackMaterialIcon = L.divIcon({
+    html: createMaterialIconHTML('place', 'black'),
+    className: 'leaflet-div-icon-material',
+    iconSize: [36, 36],
+    iconAnchor: [18, 36],
+    popupAnchor: [0, -38]
+});
+
 // Helper function to choose the DivIcon based on status
 function getIconForStatus(status) {
     switch (status) {
-        case 'Reported':
-            return redMaterialIcon;
-        case 'Ongoing':
-            return yellowMaterialIcon;
-        case 'Completed':
+        case 'No Problem':
             return greenMaterialIcon;
-        default:
+        case 'Confirmed Outage':
             return redMaterialIcon;
+        case 'Reported':
+            return grayMaterialIcon;
+        case 'Emergency':
+            return blackMaterialIcon;
+        case 'Ongoing Restoration':
+            return yellowMaterialIcon;
+        default:
+            return grayMaterialIcon;
     }
 }
 
@@ -65,7 +85,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Para di overlap markers with same coordinates
     function jitterCoordinate(value) {
-        const offset = (Math.random() - 0.5) * 0.0005; 
+        const offset = (Math.random() - 0.5) * 0.0005;
         // adjust 0.0005 if too near/far (0.0003 = closer, 0.001 = farther)
         return value + offset;
     }
@@ -77,11 +97,133 @@ document.addEventListener("DOMContentLoaded", () => {
             attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
 
-        window.filterMarkers = loadOutageMarkers; 
-        window.applyFilters = applyMapFilters; 
-        
+        // ======================
+        // LOAD BARANGAY BOUNDARIES (GeoJSON)
+        // ======================
+        fetch("baguio_barangays.geojson")
+            .then(res => res.json())
+            .then(data => {
+                const barangayLayer = L.geoJSON(data, {
+                    style: (feature) => {
+                        const status = feature.properties?.status || "Unknown";
+
+                        function getColorForStatus(status) {
+                            switch (status) {
+                                case "No Problem":
+                                    return "green";
+                                case "Confirmed Outage":
+                                    return "red";
+                                case "Reported":
+                                    return "gray";
+                                case "Emergency":
+                                    return "black";
+                                case "Ongoing Restoration":
+                                    return "orange";
+                                default:
+                                    return "#4287f5"; // fallback blue
+                            }
+                        }
+
+                        return {
+                            color: "#0050c7",
+                            weight: 1,
+                            fillColor: getColorForStatus(status),
+                            fillOpacity: 0.45
+                        };
+                    },
+                    onEachFeature: (feature, layer) => {
+                        const name = feature.properties?.ADM4_EN ?? "Unknown Barangay";
+                        const status = feature.properties?.status || "Unknown";
+
+                        // Popup (click)
+                        layer.bindPopup(`
+                            <div class="w-64 font-display">
+                                <div class="p-2 border-b dark:border-gray-600">
+                                    <h3 class="text-lg font-semibold" style="color: black;">
+                                        ${name}
+                                    </h3>
+                                    <p class="text-sm" style="color: black;">
+                                        ${feature.properties.ADM3_EN}, ${feature.properties.ADM2_EN}
+                                    </p>
+                                </div>
+
+                                <div class="p-2 space-y-2" >
+                                    <div>
+                                        <label class="text-xs font-medium" style="color: black;">Barangay Code</label>
+                                        <p class="text-sm" style="color: black;">${feature.properties.ADM4_PCODE}</p>
+                                    </div>
+
+                                    <div>
+                                        <label class="text-xs font-medium" style="color: black;">Area</label>
+                                        <p class="text-sm" style="color: black;">${feature.properties.AREA_SQKM.toFixed(2)} sq km</p>
+                                    </div>
+
+                                    <div>
+                                        <label class="text-xs font-medium" style="color: black;">Outage Status</label>
+                                        <p class="text-sm" style="color: black;">${status}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        `);
+
+                        // Tooltip (hover)
+                        layer.bindTooltip(name, {
+                            sticky: true,
+                            direction: "top",
+                            offset: [0, -10],
+                            className: "",
+                            opacity: 1
+                        });
+
+                        // Hover highlight
+                        layer.on({
+                            mouseover: (e) => {
+                                const l = e.target;
+                                l.setStyle({
+                                    weight: 3,
+                                    color: "#000",
+                                    fillOpacity: 0.6
+                                });
+                            },
+                            mouseout: (e) => {
+                                barangayLayer.resetStyle(e.target);
+                            }
+                        });
+                    }
+                });
+
+                barangayLayer.addTo(map);
+
+                const legend = L.control({ position: "topright" });
+
+                legend.onAdd = function () {
+                    const div = L.DomUtil.create("div", "map-legend");
+                    div.style.background = "white";
+                    div.style.padding = "10px";
+                    div.style.border = "1px solid #ccc";
+                    div.style.color = "black";
+                    div.innerHTML = `
+                        <strong>Outage Status</strong><br>
+                        <span style="color: green;">●</span> No Problem<br>
+                        <span style="color: red;">●</span> Confirmed Outage<br>
+                        <span style="color: gray;">●</span> Reported<br>
+                        <span style="color: black;">●</span> Emergency<br>
+                        <span style="color: orange;">●</span> Ongoing Restoration<br>
+                    `;
+                    return div;
+                };
+
+                legend.addTo(map);
+
+                map.fitBounds(barangayLayer.getBounds());
+            })
+            .catch(err => console.error("GeoJSON load error:", err));
+
+        window.filterMarkers = loadOutageMarkers;
+        window.applyFilters = applyMapFilters;
+
         setupMapSearchEnterKey();
-        
+
         // Listener for popup button -> update modal
         mapContainer.addEventListener('click', (e) => {
             const updateBtn = e.target.closest('.update-from-map-btn');
@@ -95,13 +237,18 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         populateFeederFilters();
-        loadOutageMarkers(); 
+        loadOutageMarkers();
+    }
+
+    function getRandomColor() {
+        const hue = Math.floor(Math.random() * 360);
+        return `hsl(${hue}, 70%, 75%)`;
     }
 
     // ===================================
     // 2. DATA LOADING & MARKERS
     // ===================================
-    
+
     async function populateFeederFilters() {
         const container = document.getElementById("feederButtonContainer");
         if (!container) return;
@@ -120,7 +267,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 .order('id', { ascending: true });
 
             if (error) throw error;
-            
+
             if (feeders.length === 0) {
                 container.innerHTML = `<span class="col-span-3 text-xs text-gray-500">No feeders.</span>`;
                 return;
@@ -150,7 +297,7 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error("Supabase client not found.");
             return;
         }
-        
+
         // --- Date Filter ---
         const dateInput = document.getElementById("calendarInput");
         const selectedDate = dateInput?.value;
@@ -158,14 +305,14 @@ document.addEventListener("DOMContentLoaded", () => {
         let todayISO, tomorrowISO;
         if (selectedDate) {
             const selectedDay = new Date(selectedDate);
-            selectedDay.setHours(0, 0, 0, 0); 
+            selectedDay.setHours(0, 0, 0, 0);
             const nextDay = new Date(selectedDay);
             nextDay.setDate(selectedDay.getDate() + 1);
             todayISO = selectedDay.toISOString();
             tomorrowISO = nextDay.toISOString();
         } else {
             const today = new Date();
-            today.setHours(0, 0, 0, 0); 
+            today.setHours(0, 0, 0, 0);
             const tomorrow = new Date(today);
             tomorrow.setDate(today.getDate() + 1);
             todayISO = today.toISOString();
@@ -179,8 +326,8 @@ document.addEventListener("DOMContentLoaded", () => {
             .not('latitude', 'is', null)
             .not('longitude', 'is', null)
             .in('status', ['Reported', 'Ongoing'])
-            .gte('updated_at', todayISO)   
-            .lt('updated_at', tomorrowISO); 
+            .gte('updated_at', todayISO)
+            .lt('updated_at', tomorrowISO);
 
         if (error) {
             console.error("Error fetching announcement markers:", error);
@@ -204,11 +351,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
             allMarkers.push({
                 marker: marker,
-                searchableText: 
-                    (outage.location || '').toLowerCase() + ' ' + 
+                searchableText:
+                    (outage.location || '').toLowerCase() + ' ' +
                     (outage.areas_affected || []).join(' ').toLowerCase(),
                 feeder: outage.feeder_id,
-                status: outage.status 
+                status: outage.status
             });
         });
 
@@ -219,13 +366,13 @@ document.addEventListener("DOMContentLoaded", () => {
      * ✅ UPDATED: Popup now uses announcement fields
      */
     function createPopupHTML(outage) {
-        const eta = outage.estimated_restoration_at 
-            ? new Date(outage.estimated_restoration_at).toLocaleString() 
+        const eta = outage.estimated_restoration_at
+            ? new Date(outage.estimated_restoration_at).toLocaleString()
             : "To be determined";
 
         const statusClass = outage.status === 'Ongoing' ? 'bg-blue-100 text-blue-800'
                         : outage.status === 'Reported' ? 'bg-red-100 text-red-800'
-                        : 'bg-green-100 text-green-800'; 
+                        : 'bg-green-100 text-green-800';
 
         return `
             <div class="w-64 font-display">
@@ -233,16 +380,16 @@ document.addEventListener("DOMContentLoaded", () => {
                     <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${statusClass}">
                         ${outage.status}
                     </span>
-                    <h3 class="font-semibold text-gray-800 dark:text-gray-100 mt-1">${outage.location || 'Outage Announcement'}</h3>
+                    <h3 class="font-semibold mt-1" style="color: black;">${outage.location || 'Outage Announcement'}</h3>
                 </div>
-                <div class="p-2 space-y-2 text-gray-700 dark:text-gray-300">
+                <div class="p-2 space-y-2">
                     <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400">Affected Areas</label>
-                        <p class="text-sm">${(outage.areas_affected || []).join(", ")}</p>
+                        <label class="text-xs font-medium" style="color: black;">Affected Areas</label>
+                        <p class="text-sm" style="color: black;">${(outage.areas_affected || []).join(", ")}</p>
                     </div>
                     <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400">ETA</label>
-                        <p class="text-sm font-bold text-blue-600 dark:text-blue-400">${eta}</p>
+                        <label class="text-xs font-medium" style="color: black;">ETA</label>
+                        <p class="text-sm" style="color: black;">${eta}</p>
                     </div>
                 </div>
                 <div class="p-2 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
