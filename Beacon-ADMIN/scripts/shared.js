@@ -1105,46 +1105,65 @@ if (feederBtn && feederPopup) {
       });
   }
 
-  // --- Profile Dropdown & Modal Logic (from sharedog.js) ---
+  // =================================================================
+  // FIXED PROFILE LOGIC (Self-Contained)
+  // =================================================================
+
+  // --- 1. Define the Sync Function (Internal Helper) ---
+  async function internalSyncUserProfile() {
+      if (!window.supabase) return;
+      
+      // Get active session
+      const { data: { session }, error } = await supabase.auth.getSession();
+      
+      // UI Elements
+      const headerName = document.getElementById("adminName");
+      const headerImg = document.getElementById("adminProfile");
+      const dropdownEmail = document.querySelector("#profileDropdown p.text-gray-500");
+      const settingsNameInput = document.getElementById('nicknameInput');
+
+      if (error || !session) {
+          if (headerName) headerName.textContent = "GUEST";
+          return;
+      }
+
+      const user = session.user;
+      const meta = user.user_metadata || {};
+      
+      // Use Metadata Name OR Email username
+      const displayName = meta.display_name || user.email.split('@')[0];
+      
+      // Update Header
+      if (headerName) headerName.textContent = displayName.toUpperCase();
+      if (headerImg && meta.avatar_url) headerImg.src = meta.avatar_url;
+      if (dropdownEmail) dropdownEmail.textContent = user.email;
+      
+      // Update Settings Input (if modal is open)
+      if (settingsNameInput) settingsNameInput.value = displayName;
+  }
+
+  // --- 2. Run Sync Immediately ---
+  internalSyncUserProfile();
+
+  // --- 3. Modal & Dropdown Logic ---
+  window.setupDropdownToggle("profileTrigger", "profileDropdown");
+
   const openProfileModalBtn = document.getElementById('openProfileModalBtn');
   const profileModal = document.getElementById('profileModal');
   const closeProfileModalBtn = document.getElementById('closeProfileModalBtn');
   const cancelUpdateBtn = document.getElementById('cancelUpdateBtn');
   const profileUpdateForm = document.getElementById('profileUpdateForm');
-  const adminNameSpan = document.getElementById('adminName');
-  const nicknameInput = document.getElementById('nicknameInput');
-  const adminProfileImg = document.getElementById('adminProfile');
-  const profilePicInput = document.getElementById('profilePictureInput');
-  const passwordInput = document.getElementById('passwordInput');
 
-  // Load saved profile info on page load
-  try {
-      const savedNickname = localStorage.getItem('adminNickname');
-      if (savedNickname) {
-          if (adminNameSpan) adminNameSpan.textContent = savedNickname.toUpperCase();
-          if (nicknameInput) nicknameInput.value = savedNickname;
-      }
-
-      const savedProfilePic = localStorage.getItem('adminProfilePic');
-      if (savedProfilePic) {
-          if (adminProfileImg) adminProfileImg.src = savedProfilePic;
-      }
-  } catch (e) {
-      console.error("Error loading profile from localStorage:", e);
-  }
-
-  // 1. Dropdown Toggle Logic
-  window.setupDropdownToggle("profileTrigger", "profileDropdown");
-
-  // 2. Modal Open/Close Logic
   const openModal = () => {
       if (profileModal) {
           profileModal.classList.remove('hidden');
           profileModal.classList.add('flex');
-          const profileDropdown = document.getElementById('profileDropdown');
-          if (profileDropdown) profileDropdown.classList.add('hidden');
+          internalSyncUserProfile(); // Refresh data when opening
+          const dropdown = document.getElementById('profileDropdown');
+          if (dropdown) dropdown.classList.add('hidden');
       }
   };
+
   const closeModal = () => {
       if (profileModal) {
           profileModal.classList.add('hidden');
@@ -1152,90 +1171,85 @@ if (feederBtn && feederPopup) {
       }
   };
 
+  // Attach Listeners (Check if elements exist first to avoid errors)
   if (openProfileModalBtn) openProfileModalBtn.addEventListener('click', (e) => { e.preventDefault(); openModal(); });
   if (closeProfileModalBtn) closeProfileModalBtn.addEventListener('click', closeModal);
   if (cancelUpdateBtn) cancelUpdateBtn.addEventListener('click', closeModal);
-  if (profileModal) profileModal.addEventListener('click', (e) => { if (e.target === profileModal) closeModal(); });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && profileModal && !profileModal.classList.contains('hidden')) closeModal(); });
 
-  // 3. Logout Button Logic
+  // --- 4. Logout Logic ---
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) {
-    console.log("DEBUG: Logout button found, adding listener.");
-    logoutBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      console.log("DEBUG: Logout CLICKED.");
-      try {
-          window.location.href = 'login.html';
-          console.log("DEBUG: Redirect command executed.");
-      } catch (redirectError) {
-          console.error("DEBUG: Error during redirect attempt:", redirectError);
-      }
-    });
-  } else {
-      console.error("DEBUG: Logout button (#logoutBtn) NOT FOUND.");
-  }
-
-  // 4. Form Submission
-  if (profileUpdateForm && adminNameSpan && nicknameInput && passwordInput) {
-      profileUpdateForm.addEventListener('submit', (e) => {
+      logoutBtn.addEventListener('click', async (e) => {
           e.preventDefault();
-          const newNickname = nicknameInput.value.trim();
-          const newPassword = passwordInput.value;
-
-          let updated = false;
-
-          if (newNickname && newNickname !== localStorage.getItem('adminNickname')) {
-              adminNameSpan.textContent = newNickname.toUpperCase();
-              try {
-                  localStorage.setItem('adminNickname', newNickname);
-                  updated = true;
-              } catch (err) {
-                  console.error("Error saving nickname to localStorage:", err);
-              }
-          }
-
-          if (newPassword) {
-              console.warn("Password update functionality not yet implemented.");
-              // In a real app, you would hash and send this to a server.
-              updated = true;
-          }
-
-          closeModal();
-          if (updated) {
-              window.showSuccessPopup("Profile settings updated!");
-          }
-          passwordInput.value = '';
-      });
-  }
-
-  // 5. Handle Profile Picture
-  if (profilePicInput && adminProfileImg) {
-      profilePicInput.addEventListener('change', function() {
-          const file = this.files[0];
-          if (file) {
-              if (file.size > 5 * 1024 * 1024) { // 5MB limit
-                  console.error("Image file is too large.");
-                  window.showErrorPopup("Image file is too large (Max 5MB).");
-                  profilePicInput.value = '';
-                  return;
-              }
-
-              const reader = new FileReader();
-              reader.onload = function(e) {
-                  const imageDataUrl = e.target.result;
-                  adminProfileImg.src = imageDataUrl;
-                  try {
-                      localStorage.setItem('adminProfilePic', imageDataUrl);
-                  } catch (err) {
-                      console.error("Error saving profile picture to localStorage:", err);
-                      window.showErrorPopup("Could not save profile picture.");
-                  }
-              }
-              reader.readAsDataURL(file);
+          if (window.supabase) {
+              await supabase.auth.signOut();
+              localStorage.clear();
+              window.location.href = 'login.html';
           }
       });
   }
+
+  // --- 5. Update Profile Submission ---
+  if (profileUpdateForm) {
+      profileUpdateForm.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          
+          const nameInput = document.getElementById('nicknameInput');
+          const fileInput = document.getElementById('profilePictureInput');
+          const saveBtn = document.getElementById('saveProfileBtn');
+          
+          if (!nameInput) return;
+
+          // Visual Feedback
+          const originalBtnText = saveBtn ? saveBtn.textContent : 'Save';
+          if (saveBtn) { 
+              saveBtn.textContent = 'Saving...'; 
+              saveBtn.disabled = true; 
+          }
+
+          try {
+              const updates = {
+                  display_name: nameInput.value
+              };
+
+              // Helper to push updates to Supabase
+              const performUserUpdate = async (data) => {
+                  const { error } = await supabase.auth.updateUser({ data: data });
+                  if (error) throw error;
+                  
+                  window.showSuccessPopup("Profile updated successfully!");
+                  await internalSyncUserProfile(); // Update UI
+                  closeModal();
+              };
+
+              // Handle Image (Base64)
+              if (fileInput && fileInput.files && fileInput.files[0]) {
+                  const file = fileInput.files[0];
+                  const reader = new FileReader();
+                  reader.onload = async function(ev) {
+                      updates.avatar_url = ev.target.result;
+                      await performUserUpdate(updates);
+                  };
+                  reader.readAsDataURL(file);
+              } else {
+                  // Text only update
+                  await performUserUpdate(updates);
+              }
+
+          } catch (err) {
+              console.error(err);
+              window.showErrorPopup("Failed to update profile.");
+          } finally {
+              if (saveBtn) { 
+                  saveBtn.textContent = originalBtnText; 
+                  saveBtn.disabled = false; 
+              }
+          }
+      });
+  }
+  // =================================================================
+  // END FIXED PROFILE LOGIC
+  // =================================================================
 
   // --- Service Worker (from sharedog.js) ---
   if ('serviceWorker' in navigator) {
@@ -1249,5 +1263,46 @@ if (feederBtn && feederPopup) {
         });
     });
   }
+
+  // ============================================================
+// NEW: AUTH SYNC HELPER (Paste at the very bottom of shared.js)
+// ============================================================
+async function syncUserProfile() {
+  if (!window.supabase) return;
+
+  // 1. Get the active Supabase session
+  const { data: { session }, error } = await supabase.auth.getSession();
+
+  // 2. Elements to update
+  const headerName = document.getElementById("adminName");
+  const headerImg = document.getElementById("adminProfile");
+  const dropdownEmail = document.querySelector("#profileDropdown p.text-gray-500"); 
+  const settingsNameInput = document.getElementById('nicknameInput'); // Inside modal/settings
+
+  if (error || !session) {
+      console.log("No active session found.");
+      if(headerName) headerName.textContent = "GUEST";
+      return;
+  }
+
+  const user = session.user;
+  const meta = user.user_metadata || {};
+
+  // 3. Update UI with REAL data from database
+  const displayName = meta.display_name || user.email.split('@')[0];
+  const avatarUrl = meta.avatar_url;
+
+  // Update Header Name
+  if (headerName) headerName.textContent = displayName.toUpperCase();
+  
+  // Update Dropdown Email (if exists)
+  if (dropdownEmail) dropdownEmail.textContent = user.email;
+
+  // Update Header/Modal Profile Picture
+  if (headerImg && avatarUrl) headerImg.src = avatarUrl;
+
+  // Pre-fill Settings Inputs (if present on page)
+  if (settingsNameInput) settingsNameInput.value = displayName;
+}
 
 }); // End DOMContentLoaded
