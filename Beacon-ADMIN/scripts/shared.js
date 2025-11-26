@@ -657,7 +657,7 @@ try {
                 if (!window.supabase) throw new Error("Supabase client not found.");
 
                 const { data, error } = await supabase.storage
-                    .from('announcements_images') // Bucket name for announcement images
+                    .from('announcement_images') // Bucket name for announcement images
                     .upload(fileName, file);
                 
                 if (error) {
@@ -666,7 +666,7 @@ try {
                 
                 // Get the public URL for the uploaded file
                 const { data: publicUrlData } = supabase.storage
-                    .from('announcements_images')
+                    .from('announcement_images')
                     .getPublicUrl(data.path);
                 
                 newImageUrls.push(publicUrlData.publicUrl);
@@ -1106,21 +1106,27 @@ if (feederBtn && feederPopup) {
   }
 
   // =================================================================
-  // FIXED PROFILE LOGIC (Self-Contained)
+  // UPDATED PROFILE LOGIC (Matches public.profiles schema)
   // =================================================================
 
-  // --- 1. Define the Sync Function (Internal Helper) ---
+  // --- 1. Define the Sync Function (Fetches from DB) ---
   async function internalSyncUserProfile() {
       if (!window.supabase) return;
       
       // Get active session
       const { data: { session }, error } = await supabase.auth.getSession();
       
-      // UI Elements
+      // UI Elements (Header/Sidebar)
       const headerName = document.getElementById("adminName");
       const headerImg = document.getElementById("adminProfile");
       const dropdownEmail = document.querySelector("#profileDropdown p.text-gray-500");
-      const settingsNameInput = document.getElementById('nicknameInput');
+      
+      // UI Elements (Modal Inputs)
+      const modalPreview = document.getElementById("modalProfilePreview");
+      const emailInput = document.getElementById("profileEmailInput");
+      const firstNameInput = document.getElementById("firstNameInput");
+      const lastNameInput = document.getElementById("lastNameInput");
+      const mobileInput = document.getElementById("mobileInput");
 
       if (error || !session) {
           if (headerName) headerName.textContent = "GUEST";
@@ -1128,24 +1134,41 @@ if (feederBtn && feederPopup) {
       }
 
       const user = session.user;
-      const meta = user.user_metadata || {};
       
-      // Use Metadata Name OR Email username
-      const displayName = meta.display_name || user.email.split('@')[0];
-      
-      // Update Header
+      // 1. Fetch details from public.profiles
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profileError && profileError.code !== 'PGRST116') {
+          console.error("Error fetching profile:", profileError);
+      }
+
+      // 2. Determine Display Values
+      const firstName = profile?.first_name || '';
+      const lastName = profile?.last_name || '';
+      const displayName = firstName ? `${firstName} ${lastName}` : user.email.split('@')[0];
+      const avatarUrl = profile?.profile_picture || "https://via.placeholder.com/150";
+
+      // 3. Update Global UI (Header/Sidebar)
       if (headerName) headerName.textContent = displayName.toUpperCase();
-      if (headerImg && meta.avatar_url) headerImg.src = meta.avatar_url;
+      if (headerImg) headerImg.src = avatarUrl;
       if (dropdownEmail) dropdownEmail.textContent = user.email;
-      
-      // Update Settings Input (if modal is open)
-      if (settingsNameInput) settingsNameInput.value = displayName;
+
+      // 4. Update Modal Inputs (Pre-fill)
+      if (emailInput) emailInput.value = user.email; // Auth email is source of truth
+      if (firstNameInput) firstNameInput.value = firstName;
+      if (lastNameInput) lastNameInput.value = lastName;
+      if (mobileInput) mobileInput.value = profile?.mobile || '';
+      if (modalPreview) modalPreview.src = avatarUrl;
   }
 
-  // --- 2. Run Sync Immediately ---
+  // --- 2. Run Sync Immediately on Load ---
   internalSyncUserProfile();
 
-  // --- 3. Modal & Dropdown Logic ---
+  // --- 3. Modal Open/Close Logic ---
   window.setupDropdownToggle("profileTrigger", "profileDropdown");
 
   const openProfileModalBtn = document.getElementById('openProfileModalBtn');
@@ -1158,7 +1181,7 @@ if (feederBtn && feederPopup) {
       if (profileModal) {
           profileModal.classList.remove('hidden');
           profileModal.classList.add('flex');
-          internalSyncUserProfile(); // Refresh data when opening
+          internalSyncUserProfile(); // Refresh data from DB when opening
           const dropdown = document.getElementById('profileDropdown');
           if (dropdown) dropdown.classList.add('hidden');
       }
@@ -1168,15 +1191,33 @@ if (feederBtn && feederPopup) {
       if (profileModal) {
           profileModal.classList.add('hidden');
           profileModal.classList.remove('flex');
+          // Clear password fields on close for security
+          document.getElementById('newPasswordInput').value = '';
+          document.getElementById('confirmPasswordInput').value = '';
       }
   };
 
-  // Attach Listeners (Check if elements exist first to avoid errors)
   if (openProfileModalBtn) openProfileModalBtn.addEventListener('click', (e) => { e.preventDefault(); openModal(); });
   if (closeProfileModalBtn) closeProfileModalBtn.addEventListener('click', closeModal);
   if (cancelUpdateBtn) cancelUpdateBtn.addEventListener('click', closeModal);
 
-  // --- 4. Logout Logic ---
+  // --- 4. Image Preview Logic ---
+  const profilePicInput = document.getElementById('profilePictureInput');
+  const modalPreview = document.getElementById('modalProfilePreview');
+  
+  if (profilePicInput && modalPreview) {
+      profilePicInput.addEventListener('change', function(e) {
+          if (e.target.files && e.target.files[0]) {
+              const reader = new FileReader();
+              reader.onload = function(e) {
+                  modalPreview.src = e.target.result;
+              }
+              reader.readAsDataURL(e.target.files[0]);
+          }
+      });
+  }
+
+  // --- 5. Logout Logic ---
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) {
       logoutBtn.addEventListener('click', async (e) => {
@@ -1189,120 +1230,100 @@ if (feederBtn && feederPopup) {
       });
   }
 
-  // --- 5. Update Profile Submission ---
+  // --- 6. Form Submission (Save to DB) ---
   if (profileUpdateForm) {
       profileUpdateForm.addEventListener('submit', async (e) => {
           e.preventDefault();
           
-          const nameInput = document.getElementById('nicknameInput');
-          const fileInput = document.getElementById('profilePictureInput');
           const saveBtn = document.getElementById('saveProfileBtn');
-          
-          if (!nameInput) return;
-
-          // Visual Feedback
-          const originalBtnText = saveBtn ? saveBtn.textContent : 'Save';
-          if (saveBtn) { 
-              saveBtn.textContent = 'Saving...'; 
-              saveBtn.disabled = true; 
-          }
+          const originalBtnText = saveBtn.textContent;
+          saveBtn.textContent = 'Saving...';
+          saveBtn.disabled = true;
 
           try {
-              const updates = {
-                  display_name: nameInput.value
-              };
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) throw new Error("No authenticated user found.");
 
-              // Helper to push updates to Supabase
-              const performUserUpdate = async (data) => {
-                  const { error } = await supabase.auth.updateUser({ data: data });
-                  if (error) throw error;
-                  
-                  window.showSuccessPopup("Profile updated successfully!");
-                  await internalSyncUserProfile(); // Update UI
-                  closeModal();
-              };
+              const firstName = document.getElementById('firstNameInput').value.trim();
+              const lastName = document.getElementById('lastNameInput').value.trim();
+              const mobile = document.getElementById('mobileInput').value.trim();
+              const newPass = document.getElementById('newPasswordInput').value;
+              const confirmPass = document.getElementById('confirmPasswordInput').value;
+              const fileInput = document.getElementById('profilePictureInput');
 
-              // Handle Image (Base64)
-              if (fileInput && fileInput.files && fileInput.files[0]) {
+              // A. Handle Image Upload (if file selected)
+              let profilePictureUrl = null;
+              
+              if (fileInput.files && fileInput.files[0]) {
                   const file = fileInput.files[0];
-                  const reader = new FileReader();
-                  reader.onload = async function(ev) {
-                      updates.avatar_url = ev.target.result;
-                      await performUserUpdate(updates);
-                  };
-                  reader.readAsDataURL(file);
-              } else {
-                  // Text only update
-                  await performUserUpdate(updates);
+                  const fileExt = file.name.split('.').pop();
+                  const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+                  const filePath = `${fileName}`;
+
+                  // Upload to 'profile_pictures' bucket
+                  const { error: uploadError } = await supabase.storage
+                      .from('profile_pictures') 
+                      .upload(filePath, file, { upsert: true });
+
+                  if (uploadError) throw uploadError;
+
+                  // Get Public URL
+                  const { data: { publicUrl } } = supabase.storage
+                      .from('profile_pictures')
+                      .getPublicUrl(filePath);
+                  
+                  profilePictureUrl = publicUrl;
               }
 
-          } catch (err) {
-              console.error(err);
-              window.showErrorPopup("Failed to update profile.");
-          } finally {
-              if (saveBtn) { 
-                  saveBtn.textContent = originalBtnText; 
-                  saveBtn.disabled = false; 
+              // B. Update 'profiles' table
+              const updates = {
+                  id: user.id, // Ensure ID is present for upsert
+                  first_name: firstName,
+                  last_name: lastName,
+                  mobile: mobile,
+                  updated_at: new Date().toISOString()
+              };
+
+              if (profilePictureUrl) {
+                  updates.profile_picture = profilePictureUrl;
               }
+
+              const { error: dbError } = await supabase
+                  .from('profiles')
+                  .upsert(updates);
+
+              if (dbError) throw dbError;
+
+              // C. Handle Password Update (Only if filled)
+              if (newPass) {
+                  if (newPass !== confirmPass) {
+                      throw new Error("Passwords do not match.");
+                  }
+                  const { error: passError } = await supabase.auth.updateUser({ password: newPass });
+                  if (passError) throw passError;
+              }
+
+              window.showSuccessPopup("Profile updated successfully!");
+              await internalSyncUserProfile(); // Refresh UI
+              closeModal();
+
+          } catch (error) {
+              console.error(error);
+              window.showErrorPopup(error.message || "Failed to update profile.");
+          } finally {
+              saveBtn.textContent = originalBtnText;
+              saveBtn.disabled = false;
           }
       });
   }
-  // =================================================================
-  // END FIXED PROFILE LOGIC
-  // =================================================================
 
-  // --- Service Worker (from sharedog.js) ---
+  // --- Service Worker ---
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/service-worker.js')
-        .then(registration => {
-          console.log('Service Worker registered successfully:', registration);
-        })
-        .catch(error => {
-          console.error('Service Worker registration failed:', error);
-        });
+        .then(registration => console.log('Service Worker registered'))
+        .catch(error => console.error('Service Worker registration failed:', error));
     });
   }
-
-  // ============================================================
-// NEW: AUTH SYNC HELPER (Paste at the very bottom of shared.js)
-// ============================================================
-async function syncUserProfile() {
-  if (!window.supabase) return;
-
-  // 1. Get the active Supabase session
-  const { data: { session }, error } = await supabase.auth.getSession();
-
-  // 2. Elements to update
-  const headerName = document.getElementById("adminName");
-  const headerImg = document.getElementById("adminProfile");
-  const dropdownEmail = document.querySelector("#profileDropdown p.text-gray-500"); 
-  const settingsNameInput = document.getElementById('nicknameInput'); // Inside modal/settings
-
-  if (error || !session) {
-      console.log("No active session found.");
-      if(headerName) headerName.textContent = "GUEST";
-      return;
-  }
-
-  const user = session.user;
-  const meta = user.user_metadata || {};
-
-  // 3. Update UI with REAL data from database
-  const displayName = meta.display_name || user.email.split('@')[0];
-  const avatarUrl = meta.avatar_url;
-
-  // Update Header Name
-  if (headerName) headerName.textContent = displayName.toUpperCase();
-  
-  // Update Dropdown Email (if exists)
-  if (dropdownEmail) dropdownEmail.textContent = user.email;
-
-  // Update Header/Modal Profile Picture
-  if (headerImg && avatarUrl) headerImg.src = avatarUrl;
-
-  // Pre-fill Settings Inputs (if present on page)
-  if (settingsNameInput) settingsNameInput.value = displayName;
-}
 
 }); // End DOMContentLoaded

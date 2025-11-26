@@ -1,9 +1,9 @@
 // ==========================================
-// OUTAGES.JS - Final (v8 - No Warping)
+// OUTAGES.JS - Fixed (v11 - Multi-Image Gallery)
 // ==========================================
 
 document.addEventListener("DOMContentLoaded", () => {
-  console.log("Outages Page Script Loaded (v8 - Aspect Ratio Fix)");
+  console.log("Outages Page Script Loaded (v11 - Gallery Fix)");
 
   // --- Global State ---
   let allOutages = [];
@@ -32,14 +32,17 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
     }
 
-    // 1. Layout
     setupLayoutStructure();
-
-    // 2. Filters & Data
     generateFeederFilterButtons(); 
+    setupEventDelegation(); 
+    
     await fetchOutages();          
     
-    // 3. Listeners
+    window.addEventListener('outages-updated', () => {
+        console.log("Global update detected, refreshing data...");
+        fetchOutages();
+    });
+
     window.applyFilters = renderOutages; 
     if(statusFilter) statusFilter.addEventListener("change", renderOutages);
     if(locationSearch) locationSearch.addEventListener("input", renderOutages);
@@ -53,19 +56,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const wrapper = document.createElement('div');
       wrapper.id = 'layoutWrapper';
-      // 12-col grid: Feed (8) + Sidebar (4)
-      wrapper.className = 'grid grid-cols-1 lg:grid-cols-12 gap-8 items-start'; 
+      wrapper.className = 'grid grid-cols-1 lg:grid-cols-12 gap-8 items-start relative z-0'; 
 
       originalContainer.parentNode.insertBefore(wrapper, originalContainer);
 
-      // Main Feed
       originalContainer.className = 'lg:col-span-8 space-y-6'; 
       wrapper.appendChild(originalContainer);
 
-      // Right Sidebar
       const sidebar = document.createElement('div');
       sidebar.id = 'analyticsSidebar';
-      sidebar.className = 'lg:col-span-4 space-y-6 sticky top-4';
+      sidebar.className = 'lg:col-span-4 space-y-6 sticky top-4 z-10'; 
       wrapper.appendChild(sidebar);
   }
 
@@ -74,10 +74,13 @@ document.addEventListener("DOMContentLoaded", () => {
   // ===================================
   async function fetchOutages() {
     try {
+        if(originalContainer.innerHTML === "") {
+             originalContainer.innerHTML = '<div class="p-10 text-center text-gray-400">Loading outages...</div>';
+        }
+
         const { data, error } = await supabase
             .from('announcements')
-            .select(`*, announcement_images ( image_url )`)
-            .order('created_at', { ascending: false });
+            .select(`*, announcement_images ( image_url )`);
 
         if (error) throw error;
 
@@ -87,11 +90,17 @@ document.addEventListener("DOMContentLoaded", () => {
              return { ...item, images: [...new Set([...newImgs, ...oldImgs])] };
         }) || [];
 
+        // Sort: Newest Updated/Created first
+        allOutages.sort((a, b) => {
+            const dateA = new Date(a.updated_at || a.created_at);
+            const dateB = new Date(b.updated_at || b.created_at);
+            return dateB - dateA; 
+        });
+
         renderOutages();
 
     } catch (err) {
         console.error("Error fetching outages:", err);
-        if(window.showErrorPopup) window.showErrorPopup("Failed to load outages");
     }
   }
 
@@ -102,16 +111,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const sidebar = document.getElementById('analyticsSidebar');
       if(!sidebar) return;
 
-      // Metrics
       const activeOutages = filteredData.filter(i => i.status === 'Reported' || i.status === 'Ongoing');
       const activeCount = activeOutages.length;
       
-      // Top Feeder
       const feederCounts = {};
       filteredData.forEach(i => { if(i.feeder_id) feederCounts[i.feeder_id] = (feederCounts[i.feeder_id]||0)+1; });
       const topFeeder = Object.keys(feederCounts).sort((a,b) => feederCounts[b] - feederCounts[a])[0] || 'None';
 
-      // Hotspot Area
       const areaCounts = {};
       filteredData.forEach(item => {
           if (item.areas_affected && item.areas_affected.length > 0) {
@@ -122,7 +128,6 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       const topArea = Object.keys(areaCounts).sort((a,b) => areaCounts[b] - areaCounts[a])[0] || 'N/A';
 
-      // Longest Active (Critical Attention)
       let longestOutage = null;
       let maxDuration = 0;
       const now = new Date();
@@ -183,7 +188,7 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
         
         <div class="bg-blue-50 dark:bg-blue-900/10 rounded-2xl p-6 border border-blue-100 dark:border-blue-800/30">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-2">AI Suggestion</h4>
+            <h4 class="text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-2">Suggestion</h4>
             <p class="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
                 ${activeCount > 0 ? `Focus dispatch teams on <strong>${topArea}</strong> (Feeder ${topFeeder}) to maximize restoration impact.` : 'Grid status is nominal.'}
             </p>
@@ -195,7 +200,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ===================================
-  // 4. MAIN FEED RENDER (Fixed Images)
+  // 4. MAIN FEED RENDER
   // ===================================
   function renderOutages() {
     if(!originalContainer) return;
@@ -229,21 +234,21 @@ document.addEventListener("DOMContentLoaded", () => {
     let html = '';
     filtered.forEach(item => {
         const config = window.STATUS_COLORS[item.status] || window.STATUS_COLORS.Default;
-        const dateObj = new Date(item.created_at);
-        const dateStr = dateObj.toLocaleString('en-US', { weekday: 'short', month:'short', day:'numeric', hour: 'numeric', minute:'numeric', hour12: true });
-        
+        const displayDate = new Date(item.updated_at || item.created_at);
+        const dateStr = displayDate.toLocaleString('en-US', { weekday: 'short', month:'short', day:'numeric', hour: 'numeric', minute:'numeric', hour12: true });
+        const isEdited = item.updated_at && (new Date(item.updated_at) > new Date(item.created_at));
+
         const headerTitle = `
             <span class="font-bold text-gray-900 dark:text-white text-lg">${item.cause || 'Outage'}</span> 
             <span class="text-gray-400 font-normal mx-1 text-sm">at</span> 
             <span class="font-bold text-gray-900 dark:text-white text-lg">${item.location || 'Unknown Area'}</span>
         `;
 
-        // FIX: Use 'w-full h-auto' to respect aspect ratio and prevent warping
         let imagesHtml = '';
         if (item.images && item.images.length > 0) {
             imagesHtml = `
-                <div class="w-full mt-4 bg-gray-100 dark:bg-gray-900 rounded-xl overflow-hidden border border-gray-100 dark:border-gray-700 relative group-image">
-                    <img src="${item.images[0]}" class="w-full h-auto max-h-[500px] object-contain bg-gray-50 dark:bg-gray-800 cursor-pointer view-image-trigger" data-src="${item.images[0]}">
+                <div class="w-full mt-4 bg-gray-100 dark:bg-gray-900 rounded-xl overflow-hidden border border-gray-100 dark:border-gray-700 relative group-image cursor-pointer view-image-trigger">
+                    <img src="${item.images[0]}" class="w-full h-auto max-h-[500px] object-contain bg-gray-50 dark:bg-gray-800">
                     ${item.images.length > 1 ? 
                         `<div class="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-lg font-bold backdrop-blur-sm pointer-events-none">
                             +${item.images.length - 1} photos
@@ -265,7 +270,10 @@ document.addEventListener("DOMContentLoaded", () => {
                         <div class="flex items-center gap-2 mt-1">
                              <span class="text-xs font-bold uppercase tracking-wide ${config.text}">${item.status}</span>
                              <span class="text-gray-300">•</span>
-                             <p class="text-sm text-gray-500 dark:text-gray-400">${dateStr}</p>
+                             <p class="text-sm text-gray-500 dark:text-gray-400">
+                                ${dateStr} 
+                                ${isEdited ? '<span class="text-xs italic text-gray-400 ml-1">(edited)</span>' : ''}
+                             </p>
                         </div>
                     </div>
                 </div>
@@ -295,8 +303,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     
     originalContainer.innerHTML = html;
-    setupEventDelegation();
-  }
+}
 
   // ===================================
   // 5. EVENTS & MODALS
@@ -311,15 +318,25 @@ document.addEventListener("DOMContentLoaded", () => {
         const updateBtn = target.closest('.update-btn');
         if (updateBtn) {
             e.stopPropagation();
+            e.preventDefault();
             window.showUpdateModal([updateBtn.dataset.id], 'outages');
             return;
         }
 
-        // Image
+        // Image Gallery Trigger
         const imgTrigger = target.closest('.view-image-trigger');
         if (imgTrigger) {
             e.stopPropagation();
-            showImageModal(imgTrigger.dataset.src);
+            
+            // FIX: Find the outage object to get ALL images, not just the cover
+            const card = imgTrigger.closest('.outage-card-trigger');
+            if (card) {
+                const id = parseInt(card.dataset.id);
+                const item = allOutages.find(i => i.id === id);
+                if (item && item.images && item.images.length > 0) {
+                    showImageGallery(item.images);
+                }
+            }
             return;
         }
 
@@ -332,11 +349,36 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function showImageModal(url) {
+  // FIX: Converted to Gallery Mode (Scrollable)
+  function showImageGallery(images) {
       const modal = document.createElement('div');
-      modal.className = 'fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center z-[9999] p-4 cursor-zoom-out';
-      modal.innerHTML = `<img src="${url}" class="max-w-full max-h-full rounded shadow-2xl">`;
-      modal.onclick = () => modal.remove();
+      modal.className = 'fixed inset-0 bg-black bg-opacity-95 flex items-center justify-center z-[9999] p-4';
+      
+      const imagesHtml = images.map(url => `
+        <div class="mb-6 last:mb-0">
+            <img src="${url}" class="w-full h-auto max-h-[85vh] object-contain rounded-lg shadow-2xl bg-gray-900 mx-auto">
+        </div>
+      `).join('');
+
+      modal.innerHTML = `
+        <div class="relative w-full max-w-4xl max-h-full flex flex-col">
+            <button class="absolute -top-10 right-0 text-white/70 hover:text-white z-50 p-2 close-gallery">
+                <span class="material-icons text-3xl">close</span>
+            </button>
+            
+            <div class="overflow-y-auto max-h-[90vh] pr-2 space-y-4 custom-scrollbar">
+                ${imagesHtml}
+            </div>
+        </div>
+      `;
+
+      // Close on backdrop or button
+      modal.addEventListener('click', (e) => {
+          if (e.target === modal || e.target.closest('.close-gallery')) {
+              modal.remove();
+          }
+      });
+      
       document.body.appendChild(modal);
   }
 
@@ -354,6 +396,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const modal = document.createElement('div');
     modal.className = 'fixed inset-0 bg-gray-900/80 backdrop-blur-sm flex items-center justify-center z-[9999] p-4';
     
+    modal.dataset.modalId = outageId;
+
     modal.innerHTML = `
       <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-scale-up">
         
@@ -413,12 +457,13 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
     document.body.appendChild(modal);
 
-    // Force Close Listeners
     modal.querySelectorAll('.close-modal').forEach(b => b.addEventListener('click', () => modal.remove()));
     
     modal.querySelector('.update-from-modal').onclick = () => {
         modal.remove();
-        window.showUpdateModal([outageId], 'outages');
+        setTimeout(() => {
+            window.showUpdateModal([outageId], 'outages');
+        }, 50);
     };
   }
 

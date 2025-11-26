@@ -1,4 +1,4 @@
-// DASHBOARD.JS Updated with Forecasting & Risk Outlook
+// DASHBOARD.JS - Final Fixes: Centered Logo, Safe Recommendations, Robust Heatmap
 
 document.addEventListener("DOMContentLoaded", () => {
   // --- Global Chart Instances ---
@@ -9,7 +9,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let peakTimeInstance = null;
   let mttrTrendInstance = null;
 
-  // NEW forecast chart instances
+  // Forecast chart instances
   let feederForecastInstance = null;
   let barangayForecastInstance = null;
   let restorationForecastInstance = null;
@@ -44,31 +44,39 @@ document.addEventListener("DOMContentLoaded", () => {
   }).addTo(map);
 
   let heatLayer = null;
-  let heatFilter = "pending";
+  // Default to "pending" to show unaddressed reports immediately
+  let heatFilter = "pending"; 
+  
   const heatFilterLabel = document.querySelector("#heatmapFilterBtn span:nth-child(4)");
   if (heatFilterLabel) heatFilterLabel.textContent = "Pending only";
 
   async function fetchHeatmapData() {
     let heatPoints = [];
-    const STATUS_WEIGHT = { pending: 1, reported: 2, ongoing: 3 };
+    // Increase weight/intensity for visibility
+    const STATUS_WEIGHT = { pending: 1.5, reported: 2, ongoing: 3 };
 
     try {
-      // Pending
+      // 1. Fetch PENDING reports (The unaddressed ones from 'reports' table)
+      // FIX: Expanded status check to ensure all "new/pending" variations are caught
       if (heatFilter === "pending" || heatFilter === "all") {
         const { data: reportsData, error: reportsError } = await supabase
           .from("reports")
           .select("latitude, longitude, status")
-          .eq("status", "pending");
+          .in("status", ["Pending", "pending", "New", "new", "Open", "open"]); 
 
         if (!reportsError && reportsData) {
           const points = reportsData
             .filter((r) => r.latitude && r.longitude)
-            .map((r) => [Number(r.latitude), Number(r.longitude), STATUS_WEIGHT.pending]);
+            .map((r) => [
+              Number(r.latitude), 
+              Number(r.longitude), 
+              STATUS_WEIGHT.pending
+            ]);
           heatPoints = heatPoints.concat(points);
         }
       }
 
-      // Reported & Ongoing from announcements
+      // 2. Fetch REPORTED/ONGOING (From 'announcements' table)
       if (heatFilter === "reportedongoing" || heatFilter === "all") {
         const { data: annData, error: annError } = await supabase
           .from("announcements")
@@ -78,21 +86,32 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!annError && annData) {
           const points = annData
             .filter((r) => r.latitude && r.longitude)
-            .map((r) => [Number(r.latitude), Number(r.longitude), STATUS_WEIGHT[r.status.toLowerCase()] || 2]);
+            .map((r) => [
+              Number(r.latitude), 
+              Number(r.longitude), 
+              STATUS_WEIGHT[r.status.toLowerCase()] || 2
+            ]);
           heatPoints = heatPoints.concat(points);
         }
       }
 
+      // Update Map Layer
       if (heatLayer) heatLayer.remove();
       if (heatPoints.length > 0) {
-        heatLayer = L.heatLayer(heatPoints, { radius: 25, blur: 15 }).addTo(map);
+        heatLayer = L.heatLayer(heatPoints, { 
+            radius: 25, 
+            blur: 15,
+            maxZoom: 15
+        }).addTo(map);
       }
     } catch (err) {
       console.error("Error updating heatmap", err);
     }
   }
 
+  // Trigger immediately
   fetchHeatmapData();
+  // Refresh periodically
   setInterval(fetchHeatmapData, 30000);
 
   const hFilterBtn = document.getElementById("heatmapFilterBtn");
@@ -117,7 +136,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const labelText = e.target.nextElementSibling.textContent;
         const spans = hFilterBtn.querySelectorAll("span");
         if (spans.length >= 4) spans[3].textContent = labelText;
-        fetchHeatmapData();
+        fetchHeatmapData(); // Refresh immediately on change
         hFilterPopup.classList.add("hidden");
       });
     });
@@ -231,7 +250,6 @@ document.addEventListener("DOMContentLoaded", () => {
         percent = 0;
       }
 
-      // For completed, a positive percent means improvement so green; for others, increase means bad (red)
       const isGood = valId === "value-completed" ? percent >= 0 : percent <= 0;
       const iconEl = document.getElementById(iconId);
       const trendEl = document.getElementById(trendId);
@@ -254,7 +272,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 }
 
-  // 3. ORIGINAL CHARTS (feeders)
+  // 3. CHARTS
   async function populateFeeders(listId) {
     const listContainer = document.getElementById(listId);
     if (!listContainer) return;
@@ -419,7 +437,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // 4. NEW ADVANCED ANALYTICS
+  // 4. ADVANCED ANALYTICS
   async function loadAdvancedAnalytics() {
     const rootCtx = document.getElementById("rootCauseChart");
     const brgyCtx = document.getElementById("barangayImpactChart");
@@ -431,7 +449,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const isDark = document.documentElement.classList.contains("dark");
     const textColor = isDark ? "#e5e7eb" : "#374151";
 
-    // Fetch all needed data
     const { data: allAnnouncements, error } = await supabase
       .from("announcements")
       .select("cause, areas_affected, created_at, restored_at, status, feeder_id, feeders(name)")
@@ -439,7 +456,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (error || !allAnnouncements) return;
 
-    // --- A. Root Cause Pareto ---
+    // --- A. Root Cause ---
     const causeCounts = {};
     allAnnouncements.forEach((a) => {
       const c = a.cause || "Unknown";
@@ -475,7 +492,7 @@ document.addEventListener("DOMContentLoaded", () => {
       },
     });
 
-    // --- B. Most Affected Barangays ---
+    // --- B. Barangay Impact ---
     const brgyCounts = {};
     allAnnouncements.forEach((a) => {
       if (Array.isArray(a.areas_affected)) {
@@ -514,7 +531,7 @@ document.addEventListener("DOMContentLoaded", () => {
       },
     });
 
-    // --- C. Peak Outage Times Bubble Chart ---
+    // --- C. Peak Time ---
     const timeMatrix = {};
     allAnnouncements.forEach((a) => {
       const date = new Date(a.created_at);
@@ -570,7 +587,7 @@ document.addEventListener("DOMContentLoaded", () => {
       },
     });
 
-    // --- D. MTTR Trend Line Chart ---
+    // --- D. MTTR ---
     const mttrByMonth = {};
     allAnnouncements.forEach((a) => {
       if (a.restored_at && a.created_at) {
@@ -618,7 +635,6 @@ document.addEventListener("DOMContentLoaded", () => {
       },
     });
 
-    // After advanced analytics, run forecasting logic using same allAnnouncements
     await buildForecasts(allAnnouncements);
   }
 
@@ -632,26 +648,20 @@ document.addEventListener("DOMContentLoaded", () => {
       };
     }
 
-    // Look-back window: entire history; horizon is used only for scaling expectation interpretation
     const feederCounts = {};
     const barangayCounts = {};
     const mttrSamples = [];
 
     allAnnouncements.forEach((a) => {
-      // Feeder frequency
       if (a.feeder_id) {
         const feederName = a.feeders ? a.feeders.name : `Feeder ${a.feeder_id}`;
         feederCounts[feederName] = (feederCounts[feederName] || 0) + 1;
       }
-
-      // Barangay frequency
       if (Array.isArray(a.areas_affected)) {
         a.areas_affected.forEach((b) => {
           barangayCounts[b] = (barangayCounts[b] || 0) + 1;
         });
       }
-
-      // MTTR sample
       if (a.restored_at && a.created_at) {
         const hrs =
           (new Date(a.restored_at) - new Date(a.created_at)) / 36e5;
@@ -718,7 +728,7 @@ document.addEventListener("DOMContentLoaded", () => {
       mttrSamples,
     } = computeFrequencyForecast(allAnnouncements, forecastHorizonDays);
 
-    // --- Feeder Forecast Chart ---
+    // --- Feeder Forecast ---
     const feederForecastCtx = document.getElementById("feederForecastChart");
     if (feederForecastCtx) {
       const topFeeders = Object.entries(feederProb)
@@ -735,7 +745,7 @@ document.addEventListener("DOMContentLoaded", () => {
           labels,
           datasets: [
             {
-              label: "Probability of incident in next 7 days (%)",
+              label: "Probability (%)",
               data: values,
               backgroundColor: "#3B82F6",
               borderRadius: 4,
@@ -770,7 +780,7 @@ document.addEventListener("DOMContentLoaded", () => {
             topProb * 100
           ).toFixed(
             1
-          )}% of historical incidents). Treat this as most likely to be affected in the coming days.`;
+          )}% of historical incidents).`;
         }
       }
 
@@ -784,13 +794,13 @@ document.addEventListener("DOMContentLoaded", () => {
             const li = document.createElement("li");
             li.innerHTML = `
               <span class="font-semibold">${name}</span>
-              – ${(p * 100).toFixed(1)}% share of past incidents
+              – ${(p * 100).toFixed(1)}% share
               <span class="ml-1 inline-block px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
                 getRiskLabel(p) === "HIGH"
-                  ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200"
+                  ? "bg-red-100 text-red-700"
                   : getRiskLabel(p) === "MEDIUM"
-                  ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
-                  : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-emerald-100 text-emerald-700"
               }">
                 ${getRiskLabel(p)}
               </span>
@@ -799,12 +809,10 @@ document.addEventListener("DOMContentLoaded", () => {
           });
         }
       }
-
-      if (forecastFeederUpdated)
-        forecastFeederUpdated.textContent = `Updated: ${forecastTime}`;
+      if (forecastFeederUpdated) forecastFeederUpdated.textContent = `Updated: ${forecastTime}`;
     }
 
-    // --- Barangay Forecast Chart ---
+    // --- Barangay Forecast ---
     const barangayForecastCtx = document.getElementById("barangayForecastChart");
     if (barangayForecastCtx) {
       const topBrgys = Object.entries(barangayProb)
@@ -821,7 +829,7 @@ document.addEventListener("DOMContentLoaded", () => {
           labels,
           datasets: [
             {
-              label: "Probability of incident in next 7 days (%)",
+              label: "Probability (%)",
               data: values,
               backgroundColor: "#EF4444",
               borderRadius: 4,
@@ -856,7 +864,7 @@ document.addEventListener("DOMContentLoaded", () => {
             topProb * 100
           ).toFixed(
             1
-          )}% of historical incidents). Treat as most likely area to be affected in the coming days.`;
+          )}% of historical incidents).`;
         }
       }
 
@@ -870,13 +878,13 @@ document.addEventListener("DOMContentLoaded", () => {
             const li = document.createElement("li");
             li.innerHTML = `
               <span class="font-semibold">${name}</span>
-              – ${(p * 100).toFixed(1)}% share of past incidents
+              – ${(p * 100).toFixed(1)}% share
               <span class="ml-1 inline-block px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
                 getRiskLabel(p) === "HIGH"
-                  ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200"
+                  ? "bg-red-100 text-red-700"
                   : getRiskLabel(p) === "MEDIUM"
-                  ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
-                  : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200"
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-emerald-100 text-emerald-700"
               }">
                 ${getRiskLabel(p)}
               </span>
@@ -885,12 +893,10 @@ document.addEventListener("DOMContentLoaded", () => {
           });
         }
       }
-
-      if (forecastBarangayUpdated)
-        forecastBarangayUpdated.textContent = `Updated: ${forecastTime}`;
+      if (forecastBarangayUpdated) forecastBarangayUpdated.textContent = `Updated: ${forecastTime}`;
     }
 
-    // --- Restoration Likelihood Chart ---
+    // --- Restoration Forecast ---
     const restorationForecastCtx = document.getElementById(
       "restorationForecastChart"
     );
@@ -943,25 +949,14 @@ document.addEventListener("DOMContentLoaded", () => {
         } else {
           const fast =
             ((buckets["<4h"] + buckets["4-8h"]) / totalSamples) * 100;
-          const withinDay =
-            ((buckets["<4h"] +
-              buckets["4-8h"] +
-              buckets["8-24h"]) /
-              totalSamples) *
-            100;
-          restorationForecastSummary.textContent = `Historically, approximately ${fast.toFixed(
+          restorationForecastSummary.textContent = `Historically, ${fast.toFixed(
             1
-          )}% of outages are restored in less than 8 hours, and ${withinDay.toFixed(
-            1
-          )}% are restored within 24 hours. Treat these as likelihoods for upcoming events.`;
+          )}% of outages are restored in less than 8 hours.`;
         }
       }
-
-      if (forecastRestorationUpdated)
-        forecastRestorationUpdated.textContent = `Updated: ${forecastTime}`;
+      if (forecastRestorationUpdated) forecastRestorationUpdated.textContent = `Updated: ${forecastTime}`;
     }
 
-    // Overall risk badge
     if (overallRiskBadge) {
       const maxFeederProb =
         Object.values(feederProb).reduce(
@@ -973,10 +968,10 @@ document.addEventListener("DOMContentLoaded", () => {
       overallRiskBadge.className =
         "inline-flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-semibold " +
         (riskLabel === "HIGH"
-          ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200"
+          ? "bg-red-100 text-red-700"
           : riskLabel === "MEDIUM"
-          ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
-          : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200");
+          ? "bg-amber-100 text-amber-700"
+          : "bg-emerald-100 text-emerald-700");
       const icon = document.createElement("span");
       icon.className = "material-icons text-xs";
       icon.textContent = "insights";
@@ -984,7 +979,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // 5. RECENT REPORTS INIT
+  // 5. RECENT REPORTS
   async function loadRecentReports() {
     if (!reportsTableBody) return;
 
@@ -1131,29 +1126,73 @@ document.addEventListener("DOMContentLoaded", () => {
     updateRestorationChart();
   }
 
-  // 6. PROFESSIONAL PDF REPORTING (existing; only hook new forecast charts into list)
+  // 6. PROFESSIONAL PDF REPORTING WITH CENTERED LOGO & SAFE RECOMMENDATIONS
   let currentPDFDoc = null;
 
+  // Helper to load image
+  const loadImage = (src) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "Anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = (e) => {
+          console.warn("Could not load logo:", src);
+          resolve(null);
+      };
+      img.src = src;
+    });
+  };
+
   function generateAnalysis(type, chartInstance) {
-    if (!chartInstance || !chartInstance.data.datasets[0].data.length) {
-      return "Insufficient data for analysis.";
+    // 1. Safety Check: If chart doesn't exist or data is empty, return generic message.
+    if (!chartInstance || 
+        !chartInstance.data || 
+        !chartInstance.data.datasets || 
+        !chartInstance.data.datasets[0] || 
+        !chartInstance.data.datasets[0].data ||
+        chartInstance.data.datasets[0].data.length === 0) {
+      return "Insufficient data for detailed analysis.";
     }
+
     const data = chartInstance.data.datasets[0].data;
     const labels = chartInstance.data.labels;
+    
+    // 2. Safety Check: If labels are missing
+    if (!labels || labels.length === 0) {
+        return "Data available, but labels are missing.";
+    }
+
+    // Helper to safely get the name associated with max value
+    // FIX: Convert to numbers before finding max to ensure type safety
+    const getMaxLabel = () => {
+        const numData = data.map(d => Number(d) || 0);
+        const maxVal = Math.max(...numData);
+        
+        if (maxVal === 0) return null; // If max is 0, no real data
+        
+        // Use index from number array
+        const index = numData.indexOf(maxVal);
+        const safeName = (labels && labels[index] !== undefined) ? labels[index] : "Unknown Area";
+        
+        return { name: safeName, val: maxVal };
+    };
+
+    const top = getMaxLabel();
 
     if (type === "rootCause") {
-      const maxVal = Math.max(...data);
-      const topCause = labels[data.indexOf(maxVal)];
-      if (topCause.includes("Vegetation")) {
+      if (!top) return "No incidents reported yet.";
+      if (top.name.includes("Vegetation")) {
         return "Recommendation: Increase tree trimming schedule in high-risk corridors.";
       }
-      if (topCause.includes("Equipment")) {
+      if (top.name.includes("Equipment")) {
         return "Recommendation: Audit aging transformers and schedule preventive maintenance.";
       }
-      return `Recommendation: Investigate high frequency of ${topCause} outages.`;
+      return `Recommendation: Investigate high frequency of ${top.name} outages.`;
     }
 
     if (type === "mttr") {
+      // Need at least 2 points for trend
+      if (data.length < 2) return "Insufficient historical data for trend analysis.";
       const first = parseFloat(data[0]);
       const last = parseFloat(data[data.length - 1]);
       if (last < first) {
@@ -1166,53 +1205,58 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (type === "feederCount") {
-      const maxVal = Math.max(...data);
-      const name = labels[data.indexOf(maxVal)];
-      return `${name} accounts for the highest volume of reports (${maxVal}). Prioritize infrastructure inspection on this line.`;
+      if (!top) return "No outage data by feeder available.";
+      return `${top.name} accounts for the highest volume of reports (${top.val}). Prioritize infrastructure inspection on this line.`;
     }
 
     if (type === "feederTime") {
-      const maxVal = Math.max(...data);
-      const name = labels[data.indexOf(maxVal)];
-      return `${name} has the slowest recovery time (${maxVal} hrs avg). Check for access issues or equipment faults specific to this area.`;
+      if (!top) return "No restoration time data available.";
+      return `${top.name} has the slowest recovery time (${top.val.toFixed(2)} hrs avg). Check for access issues or equipment faults.`;
     }
 
     if (type === "barangay") {
-      const maxVal = Math.max(...data);
-      const name = labels[data.indexOf(maxVal)];
-      return `${name} is the most frequently affected community. Engage with community leaders in ${name} regarding upcoming improvements.`;
+      if (!top) return "No barangay impact data available.";
+      return `${top.name} is the most frequently affected community. Engage with community leaders regarding upcoming improvements.`;
     }
 
     if (type === "peak") {
+      // Peak uses bubble data {x, y, r}, handled differently
       const dataset = chartInstance.data.datasets[0].data;
-      if (!dataset.length) return "No peak data.";
+      if (!dataset || dataset.length === 0) return "No peak data recorded.";
+      
       const maxBubble = dataset.reduce((prev, current) =>
         prev.r > current.r ? prev : current
-      );
+      , {r: 0}); // initial value
+
+      if (maxBubble.r === 0) return "No significant peak times detected.";
+
       const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-      return `Highest outage frequency observed on ${days[maxBubble.y]}s around ${maxBubble.x}:00 hours. Schedule additional standby crews during this window.`;
+      // Safety check for day index
+      const dayName = days[maxBubble.y] || "Unknown Day";
+      return `Highest outage frequency observed on ${dayName}s around ${maxBubble.x}:00 hours. Schedule additional standby crews during this window.`;
     }
 
     if (type === "feederForecast") {
-      const maxVal = Math.max(...data);
-      const name = labels[data.indexOf(maxVal)];
-      return `Forecast: ${name} has the highest estimated probability of experiencing an outage in the next 7 days. Consider proactive inspection or load review.`;
+      if (!top) return "Forecast: Risk data inconclusive.";
+      return `Forecast: ${top.name} has the highest estimated probability of experiencing an outage in the next 7 days. Consider proactive inspection.`;
     }
 
     if (type === "barangayForecast") {
-      const maxVal = Math.max(...data);
-      const name = labels[data.indexOf(maxVal)];
-      return `Forecast: ${name} is the barangay most at risk in the short term. Plan communication and readiness with local officials.`;
+      if (!top) return "Forecast: Risk data inconclusive.";
+      return `Forecast: ${top.name} is the barangay most at risk in the short term. Plan readiness with local officials.`;
     }
 
     if (type === "restorationForecast") {
-      const fastShare = (parseFloat(data[0]) + parseFloat(data[1]) || 0).toFixed(
-        1
-      );
-      return `Forecast: Approximately ${fastShare}% of incidents are expected to be resolved within 8 hours based on historical performance.`;
+      // restorationForecast uses fixed buckets [ <4h, 4-8h, ... ]
+      // Check if data exists
+      if (data.some(v => v > 0)) {
+        const fastShare = (parseFloat(data[0]) + parseFloat(data[1]) || 0).toFixed(1);
+        return `Forecast: Approximately ${fastShare}% of incidents are expected to be resolved within 8 hours based on historical performance.`;
+      }
+      return "Forecast: No restoration history available.";
     }
 
-    return "Data available in chart.";
+    return "Data visualization available in chart.";
   }
 
   async function generatePDFObject() {
@@ -1223,21 +1267,57 @@ document.addEventListener("DOMContentLoaded", () => {
     const margin = 15;
     let yPos = 20;
 
-    // HEADER
+    // --- 1. LOAD LOGO & USER INFO ---
+    let logoImg = null;
+    try {
+        logoImg = await loadImage("images/beneco.png");
+    } catch(err) {
+        console.warn("Logo load failed", err);
+    }
+
+    let adminEmail = "Authorized Account";
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user && user.email) {
+            adminEmail = user.email;
+        }
+    } catch(e) {
+        console.error("Could not fetch user email", e);
+    }
+
+    // --- 2. CENTERED HEADER SECTION ---
+    
+    // Add Logo if loaded (Centered)
+    if (logoImg) {
+        const logoW = 25; 
+        const logoH = 25; 
+        // Calculate center position for image
+        const xCentered = (pageWidth - logoW) / 2;
+        
+        doc.addImage(logoImg, "PNG", xCentered, 10, logoW, logoH);
+        // FIX: Increase yPos significantly to avoid overlap
+        yPos = 43; 
+    } else {
+        yPos = 20;
+    }
+
+    // Header Text (Centered)
     doc.setFontSize(24);
     doc.setTextColor(0, 123, 255);
     doc.setFont("helvetica", "bold");
-    doc.text("BEACON SYSTEM REPORT", margin, yPos);
-    yPos += 8;
+    doc.text("BEACON SYSTEM REPORT", pageWidth / 2, yPos, { align: "center" });
+    
+    yPos += 5;
+    
+    // User Email & Date (Centered)
     doc.setFontSize(10);
     doc.setTextColor(100);
     doc.setFont("helvetica", "normal");
-    const adminName =
-      document.getElementById("adminName")?.innerText || "Authorized Account";
     doc.text(
-      `Generated by: ${adminName} | Date: ${new Date().toLocaleString()}`,
-      margin,
-      yPos
+      `Generated by: ${adminEmail} | Date: ${new Date().toLocaleString()}`,
+      pageWidth / 2,
+      yPos,
+      { align: "center" }
     );
     yPos += 10;
 
@@ -1254,7 +1334,7 @@ document.addEventListener("DOMContentLoaded", () => {
       yPos + 2,
       { align: "center" }
     );
-    yPos += 20;
+    yPos += 15;
 
     // EXEC SUMMARY (tiles)
     doc.setTextColor(0);
@@ -1321,7 +1401,7 @@ document.addEventListener("DOMContentLoaded", () => {
     doc.text(String(cTrend), margin + boxWidth * 2 + 20, yPos + 18);
     yPos += 35;
 
-    // 3. CHARTS LOOP (now includes forecast charts)
+    // 3. CHARTS LOOP
     const allCharts = [
       { title: "2. Outages by Feeder", instance: feederChartInstance, type: "feederCount" },
       { title: "3. Avg Restoration Time by Feeder", instance: restorationChartInstance, type: "feederTime" },
@@ -1336,7 +1416,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     doc.setTextColor(0);
     allCharts.forEach((item) => {
-      if (!item.instance) return;
+      // Skip chart if instance doesn't exist or data is empty
+      if (!item.instance || !item.instance.data || !item.instance.data.datasets || !item.instance.data.datasets.length) {
+          return;
+      }
 
       const neededHeight = 130;
       if (yPos + neededHeight > pageHeight - 20) {
@@ -1362,7 +1445,10 @@ document.addEventListener("DOMContentLoaded", () => {
         doc.setFont("helvetica", "normal");
         doc.setFontSize(9);
         doc.setTextColor(60);
+        
+        // Generate Safe Analysis Text
         const analysisText = generateAnalysis(item.type, item.instance);
+        
         const splitText = doc.splitTextToSize(
           analysisText,
           pageWidth - margin * 2 - 10
@@ -1371,7 +1457,7 @@ document.addEventListener("DOMContentLoaded", () => {
         doc.setTextColor(0);
         yPos += 30;
       } catch (e) {
-        console.error("Chart error", e);
+        console.error("Chart PDF generation error", e);
       }
     });
 
@@ -1386,7 +1472,7 @@ document.addEventListener("DOMContentLoaded", () => {
         pageHeight - 10,
         { align: "right" }
       );
-      doc.text("BEACON Internal Document", margin, pageHeight - 10);
+      doc.text("BEACON Internal Document - " + new Date().getFullYear(), margin, pageHeight - 10);
     }
 
     return doc;
@@ -1424,8 +1510,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function handleDownload() {
     if (!currentPDFDoc) return;
     const dateStr = new Date().toISOString().split("T")[0];
-    const adminName =
-      document.getElementById("adminName")?.innerText || "Admin";
+    const adminName = "Report";
     currentPDFDoc.save(`BeaconReport_${adminName}_${dateStr}.pdf`);
     handlePreviewClose();
   }

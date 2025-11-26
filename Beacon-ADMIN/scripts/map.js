@@ -56,9 +56,10 @@ function getIconForStatus(status) {
         case 'Confirmed Outage':
             return redMaterialIcon;
         case 'Reported':
-            return grayMaterialIcon;
+            return redMaterialIcon; // Changed to Red based on your legend request
         case 'Emergency':
             return blackMaterialIcon;
+        case 'Ongoing':
         case 'Ongoing Restoration':
             return yellowMaterialIcon;
         default:
@@ -128,7 +129,8 @@ document.addEventListener("DOMContentLoaded", () => {
                             color: "#0050c7",
                             weight: 1,
                             fillColor: getColorForStatus(status),
-                            fillOpacity: 0.45
+                            // ✅ LIGHTER OPACITY (Was 0.45)
+                            fillOpacity: 0.2
                         };
                     },
                     onEachFeature: (feature, layer) => {
@@ -182,7 +184,8 @@ document.addEventListener("DOMContentLoaded", () => {
                                 l.setStyle({
                                     weight: 3,
                                     color: "#000",
-                                    fillOpacity: 0.6
+                                    // ✅ LIGHTER HOVER OPACITY (Was 0.6)
+                                    fillOpacity: 0.4
                                 });
                             },
                             mouseout: (e) => {
@@ -196,6 +199,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 const legend = L.control({ position: "topright" });
 
+                // ✅ UPDATED LEGEND: Only Red (Reported) and Yellow/Orange (Ongoing)
                 legend.onAdd = function () {
                     const div = L.DomUtil.create("div", "map-legend");
                     div.style.background = "white";
@@ -204,11 +208,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     div.style.color = "black";
                     div.innerHTML = `
                         <strong>Outage Status</strong><br>
-                        <span style="color: green;">●</span> No Problem<br>
-                        <span style="color: red;">●</span> Confirmed Outage<br>
-                        <span style="color: gray;">●</span> Reported<br>
-                        <span style="color: black;">●</span> Emergency<br>
-                        <span style="color: orange;">●</span> Ongoing Restoration<br>
+                        <span style="color: red;">●</span> Reported<br>
+                        <span style="color: orange;">●</span> Ongoing<br>
                     `;
                     return div;
                 };
