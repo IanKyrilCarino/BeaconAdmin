@@ -1028,7 +1028,7 @@ document.addEventListener("DOMContentLoaded", () => {
           </span>
         </td>
         <td class="py-3 px-4">
-          <a href="outages.html" class="text-blue-600 hover:underline text-xs font-medium">
+          <a href="outages.html?id=${item.id}" class="text-blue-600 hover:underline text-xs font-medium">
             View
           </a>
         </td>

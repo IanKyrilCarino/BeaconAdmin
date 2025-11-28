@@ -258,7 +258,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         html += `
-        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden hover:shadow-md transition-shadow cursor-pointer outage-card-trigger" data-id="${item.id}">
+        <div id="report-${item.id}" class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden hover:shadow-md transition-shadow cursor-pointer outage-card-trigger" data-id="${item.id}">
             
             <div class="p-5 pb-2 flex justify-between items-start">
                 <div class="flex items-start gap-3">
@@ -303,6 +303,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     
     originalContainer.innerHTML = html;
+    handleDeepLink();
 }
 
   // ===================================
@@ -507,3 +508,33 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 });
+
+// ==========================================
+// 7. DEEP LINK (DOUBLE-TAP FIX)
+// ==========================================
+function handleDeepLink() {
+    const params = new URLSearchParams(window.location.search);
+    const targetId = params.get('id');
+    
+    if (targetId) {
+        const el = document.getElementById(`report-${targetId}`);
+        if (el) {
+            // STEP 1: Instant Jump (Best Guess)
+            // We use 'center' to avoid the sticky header covering the top
+            el.scrollIntoView({ behavior: "auto", block: "center" });
+            
+            // Highlight ON
+            el.classList.add('ring-4', 'ring-yellow-400');
+            
+            // STEP 2: The Correction (Crucial Fix)
+            // We force a second jump after 400ms. 
+            // This catches the post if images loaded and pushed it down.
+            setTimeout(() => {
+                el.scrollIntoView({ behavior: "auto", block: "center" });
+            }, 400);
+
+            // Highlight OFF
+            setTimeout(() => el.classList.remove('ring-4', 'ring-yellow-400'), 2500);
+        }
+    }
+}
