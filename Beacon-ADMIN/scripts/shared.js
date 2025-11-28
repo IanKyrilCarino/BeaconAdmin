@@ -1,6 +1,5 @@
 // ==========================
-// SHARED SCRIPT (v10 - Manual Announcement & Scheduled Date Fix)
-// (Contains universal utilities, UI logic, unified modals, and all page/filter event listeners)
+// SHARED SCRIPT (v12 - Restored Original Logic + Fixed Profile Only)
 // ==========================
 // Loaded SECOND on every page
 
@@ -96,14 +95,10 @@ document.addEventListener("click", (e) => {
  */
 window.showUpdateModal = async function(itemIds, context, options = {}) {
   
-// =================================================================
-// ✅ FIX 1: Allow empty array IF manualCreation is true
-// =================================================================
 if ((!Array.isArray(itemIds) || itemIds.length === 0) && !options.manualCreation) {
   console.error('No item IDs provided to showUpdateModal');
   return;
 }
-// =================================================================
 
 const isBulk = itemIds.length > 1;
 const dispatchTeams = [
@@ -113,7 +108,6 @@ const dispatchTeams = [
 ];
 
 try {
-  // Get data based on context with proper fallbacks
   let itemsData = [];
   let allAssociatedIds = [];
   let feederId = options.currentFeederId || null;
@@ -122,33 +116,23 @@ try {
   console.log(`showUpdateModal called with context: ${context}, itemIds:`, itemIds, 'options:', options);
 
   if (context === 'reports') {
-    // For reports, we need to get pending items
     const pendingItems = window.getPendingItems ? window.getPendingItems() : [];
-    console.log('Pending items found:', pendingItems.length);
     
     if (options.currentView === 'barangays') {
-      // Barangay view - itemIds are barangay names
       itemsData = itemIds.map(barangayName => ({ barangay: barangayName }));
       selectedBarangays = new Set(itemIds);
       
-      // Get all reports for these barangays to determine feeder
       const barangayReports = pendingItems.filter(r => itemIds.includes(r.barangay));
-      console.log('Barangay reports found:', barangayReports.length);
       
       if (barangayReports.length > 0 && !feederId) {
         feederId = barangayReports[0].feeder;
-        console.log('Feeder ID determined from barangay reports:', feederId);
       }
       
       allAssociatedIds = barangayReports.map(r => r.id);
     } else {
-      // Individual reports view
       itemsData = pendingItems.filter(r => itemIds.includes(r.id));
-      console.log('Individual reports data:', itemsData);
-      
       allAssociatedIds = itemIds;
       
-      // Get selected barangays and feeder from reports
       itemsData.forEach(item => {
         if (item.barangay) selectedBarangays.add(item.barangay);
         if (!feederId && item.feeder) {
@@ -162,7 +146,6 @@ try {
     return;
   }
 
-  // Only fetch if we actually have IDs (skip for manual creation)
   if (itemIds.length > 0) {
       const { data, error } = await supabase
         .from('announcements')
@@ -175,18 +158,14 @@ try {
         return;
       }
 
-      // Map data to create the `images` array the modal expects
       itemsData = data.map(item => {
-        // Get URLs from the new related table
         const newImageUrls = item.announcement_images 
           ? item.announcement_images.map(img => img.image_url) 
           : [];
         
-        // Fallback for any URLs still in the old 'pictures' or 'picture' columns
         const oldImageUrls = Array.isArray(item.pictures) ? item.pictures : [];
         const singleImageUrl = item.picture ? [item.picture] : [];
         
-        // Combine all and remove duplicates
         const allImageUrls = [
           ...new Set([
             ...newImageUrls, 
@@ -197,7 +176,7 @@ try {
 
         return {
           ...item,
-          images: allImageUrls // This `images` property is used by the preview logic
+          images: allImageUrls
         };
       });
   }
@@ -212,10 +191,6 @@ try {
   });
 }
 
-
-  // =================================================================
-  // ✅ FIX 2: Skip "No data found" check if manualCreation
-  // =================================================================
   if (itemsData.length === 0 && allAssociatedIds.length === 0 && !options.manualCreation) {
     console.warn('No data found for the provided IDs');
     window.showErrorPopup('No data found for the selected items');
@@ -223,74 +198,42 @@ try {
   }
 
   const initialData = itemsData[0] || {};
-  console.log('Initial data for modal:', initialData);
-  console.log('Selected barangays:', Array.from(selectedBarangays));
-  console.log('Feeder ID:', feederId);
-
-  // DYNAMICALLY FETCH BARANGAYS FROM FEEDER_BARANGAYS TABLE
   let allBarangaysInFeeder = [];
   let feederBarangaysError = null;
 
   if (feederId && window.supabase) {
     try {
-      console.log(`Fetching barangays for feeder ${feederId}...`);
-      
       const { data: feederBarangays, error } = await supabase
         .from('feeder_barangays')
-        .select(`
-          barangay_id,
-          barangays (
-            id,
-            name
-          )
-        `)
+        .select(`barangay_id, barangays ( id, name )`)
         .eq('feeder_id', parseInt(feederId));
 
       if (error) {
         feederBarangaysError = error;
-        console.error('Error fetching feeder barangays:', error);
       } else {
-        console.log(`Found ${feederBarangays?.length || 0} barangay relationships for feeder ${feederId}`);
-        
         if (feederBarangays && feederBarangays.length > 0) {
           allBarangaysInFeeder = feederBarangays
             .map(fb => {
-              if (!fb.barangays) {
-                console.warn('Missing barangay data for barangay_id:', fb.barangay_id);
-                return null;
-              }
+              if (!fb.barangays) return null;
               return fb.barangays.name;
             })
             .filter(Boolean)
             .sort();
-          
-          console.log(`Processed ${allBarangaysInFeeder.length} barangay names:`, allBarangaysInFeeder);
-        } else {
-          console.warn(`No barangays found in feeder_barangays for feeder ${feederId}`);
         }
       }
     } catch (error) {
       feederBarangaysError = error;
-      console.error('Exception fetching feeder barangays:', error);
     }
   }
 
-  // If no barangays found from feeder_barangays, try alternative approaches
   if (allBarangaysInFeeder.length === 0) {
-    console.log('Trying fallback methods to get barangays...');
-
-    // Method 1: Use selected barangays from the data
     if (selectedBarangays.size > 0) {
       allBarangaysInFeeder = Array.from(selectedBarangays).sort();
-      console.log(`Using selected barangays as fallback:`, allBarangaysInFeeder);
     }
-    // Method 2: Get from reports data for this feeder
     else if (context === 'reports' && feederId) {
       const reportsInFeeder = (window.mockAllReports || []).filter(r => r.feeder === feederId);
       allBarangaysInFeeder = [...new Set(reportsInFeeder.map(r => r.barangay).filter(Boolean))].sort();
-      console.log(`Found ${allBarangaysInFeeder.length} barangays from reports data:`, allBarangaysInFeeder);
     }
-    // Method 3: Get from barangays table directly
     else if (window.supabase) {
       try {
         const { data: allBarangays, error } = await supabase
@@ -300,7 +243,6 @@ try {
         
         if (!error && allBarangays) {
           allBarangaysInFeeder = allBarangays.map(b => b.name).sort();
-          console.log(`Showing all barangays as fallback:`, allBarangaysInFeeder);
         }
       } catch (error) {
         console.error('Error fetching all barangays:', error);
@@ -308,16 +250,10 @@ try {
     }
   }
 
-  // Final fallback - if still no barangays, create a default list
   if (allBarangaysInFeeder.length === 0) {
-    console.warn('No barangays found through any method, using default list');
-    allBarangaysInFeeder = ['Barangay 1', 'Barangay 2', 'Barangay 3']; // Default fallback
-    if (feederBarangaysError) {
-      console.error('Original feeder_barangays error:', feederBarangaysError);
-    }
+    allBarangaysInFeeder = ['Barangay 1', 'Barangay 2', 'Barangay 3']; 
   }
 
-  // Generate area buttons + info
   let areaButtonsHTML = '';
   let areaInfoHTML = '';
 
@@ -325,7 +261,7 @@ try {
     areaInfoHTML = `Feeder ${feederId || 'N/A'} - ${allBarangaysInFeeder.length} barangays`;
 
     areaButtonsHTML = allBarangaysInFeeder.map(barangay => {
-      const isSelected = selectedBarangays.has(barangay); // ✅ auto-select
+      const isSelected = selectedBarangays.has(barangay); 
       return `
         <button type="button"
           class="area-toggle-btn px-3 py-1.5 rounded-full text-sm font-medium transition
@@ -343,15 +279,11 @@ try {
     areaButtonsHTML = `
       <div class="text-center p-4">
         <p class="text-red-500 text-sm mb-2">No barangays found for this feeder</p>
-        <p class="text-gray-500 text-xs">
-          Please check feeder_barangays relationships.
-        </p>
       </div>
     `;
   }
 
 
-  // Create modal HTML
   const modal = document.createElement('div');
   modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4';
   modal.id = 'updateModal';
@@ -505,16 +437,13 @@ try {
   `;
   document.body.appendChild(modal);
 
-  // --- Modal Event Listeners ---
   modal.querySelectorAll('.close-modal').forEach(btn => 
     btn.addEventListener('click', () => modal.remove())
   );
 
-  // --- NEW: Schedule Date Logic ---
   const scheduledDateContainer = modal.querySelector('#scheduledDateContainer');
   const radioButtons = modal.querySelectorAll('input[name="outageType"]');
 
-  // Function to toggle visibility based on selected radio
   const toggleScheduledInput = () => {
     const selected = modal.querySelector('input[name="outageType"]:checked').value;
     if (selected === 'scheduled') {
@@ -524,19 +453,15 @@ try {
     }
   };
 
-  // Initial check
   toggleScheduledInput();
 
-  // Add listeners
   radioButtons.forEach(radio => {
     radio.addEventListener('change', toggleScheduledInput);
   });
 
-  // Coordinate input toggle
   const enableCoordinates = modal.querySelector('#enableCoordinates');
   const coordinateInput = modal.querySelector('#coordinateInput');
 
-  // ✅ Pre-fill coordinates if existing
   if (initialData.latitude && initialData.longitude) {
     enableCoordinates.checked = true;
     coordinateInput.classList.remove('hidden');
@@ -547,7 +472,6 @@ try {
     coordinateInput.classList.toggle('hidden', !enableCoordinates.checked);
   });
 
-  // Area toggle buttons with select all functionality
   const areaButtons = modal.querySelectorAll('.area-toggle-btn');
   const selectAllCheckbox = modal.querySelector('#selectAllBarangays');
   let selectedAreas = new Set(selectedBarangays);
@@ -573,7 +497,6 @@ try {
   areaButtons.forEach(btn => {
   const barangay = btn.dataset.barangay;
 
-  // Ensure visual state matches selected set on load
   if (selectedAreas.has(barangay)) {
     btn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700');
     btn.classList.remove('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300', 'dark:bg-gray-700', 'dark:text-gray-200', 'dark:hover:bg-gray-600');
@@ -590,7 +513,6 @@ try {
       btn.classList.remove('bg-gray-200', 'text-gray-800', 'hover:bg-gray-300', 'dark:bg-gray-700', 'dark:text-gray-200', 'dark:hover:bg-gray-600');
     }
 
-    // Update select-all checkbox state
     if (selectAllCheckbox) {
       selectAllCheckbox.checked = selectedAreas.size === areaButtons.length;
       selectAllCheckbox.indeterminate = selectedAreas.size > 0 && selectedAreas.size < areaButtons.length;
@@ -598,15 +520,12 @@ try {
   });
 });
 
-
-  // Status change handler
   const statusSelect = modal.querySelector('#statusSelect');
   const dispatchSection = modal.querySelector('#dispatchTeamSection');
   statusSelect.addEventListener('change', () => 
     dispatchSection.classList.toggle('hidden', statusSelect.value !== 'Ongoing')
   );
 
-  // Image preview
   const fileInput = modal.querySelector('#modalFileInput');
   const imagePreview = modal.querySelector('#imagePreview');
   fileInput.addEventListener('change', (e) => {
@@ -624,9 +543,6 @@ try {
     });
   });
 
-  // Pre-populate image preview if existing images
-  // This works because `initialData.images` was set correctly
-  // by the logic in MODIFICATION 1
   if (initialData.images && initialData.images.length > 0) {
     initialData.images.forEach(imgSrc => {
       const img = document.createElement('img');
@@ -636,7 +552,6 @@ try {
     });
   }
 
-  // Form submission
   modal.querySelector('#updateForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const submitButton = modal.querySelector('button[type="submit"]');
@@ -646,40 +561,34 @@ try {
     try {
         const files = modal.querySelector('#modalFileInput').files;
         const newImageUrls = []; 
-        let isBulk = itemIds.length > 1; // Get isBulk status
+        let isBulk = itemIds.length > 1; 
 
         if (files.length > 0) {
             console.log(`Uploading ${files.length} images...`);
             for (const file of files) {
-                // Use a 'public' folder for simplicity, or structure as needed
                 const fileName = `public/${Date.now()}-${file.name}`;
                 
                 if (!window.supabase) throw new Error("Supabase client not found.");
 
                 const { data, error } = await supabase.storage
-                    .from('announcement_images') // Bucket name for announcement images
+                    .from('announcement_images') 
                     .upload(fileName, file);
                 
                 if (error) {
                     throw new Error(`Image upload failed: ${error.message}`);
                 }
                 
-                // Get the public URL for the uploaded file
                 const { data: publicUrlData } = supabase.storage
                     .from('announcement_images')
                     .getPublicUrl(data.path);
                 
                 newImageUrls.push(publicUrlData.publicUrl);
             }
-            console.log('New Image URLs:', newImageUrls);
         }
 
-        // Merge with existing images (if any)
-        // This works because `initialData.images` was set correctly
         const existingImageUrls = initialData.images || [];
         const allImageUrls = [...existingImageUrls, ...newImageUrls];
 
-        // ✅ Parse coordinates if toggle enabled
         const coordText = coordinateInput && !coordinateInput.classList.contains('hidden')
           ? coordinateInput.value.trim()
           : null;
@@ -700,18 +609,13 @@ try {
           status: modal.querySelector('#statusSelect').value,
           description: modal.querySelector('#modalDescription').value,
           eta: modal.querySelector('#modalEta').value,
-          scheduled_at: modal.querySelector('#scheduledAtInput').value, // ✅ NEW
-          // dispatchTeam: modal.querySelector('#dispatchTeamSelect')?.value || null,
+          scheduled_at: modal.querySelector('#scheduledAtInput').value, 
           affectedAreas: Array.from(selectedAreas),
-          imageUrls: allImageUrls, // This is the *complete* set of URLs
+          imageUrls: allImageUrls, 
           latitude,    
           longitude    
         };
 
-
-        console.log('Form submission data:', formData);
-
-        // Call context-specific update handler
         if (context === 'reports') {
             await handleReportsUpdate(allAssociatedIds, formData, feederId);
         } else if (context === 'outages') {
@@ -724,7 +628,6 @@ try {
         console.error('Error during submission:', error);
         window.showErrorPopup(error.message);
         submitButton.disabled = false;
-        // Reset button text
         let isBulk = itemIds.length > 1; 
         submitButton.textContent = isBulk ? 'Post Bulk Announcement' : 'Update Announcement';
     }
@@ -737,13 +640,7 @@ try {
 };
 
 /**
- * Handle reports update
- */
-/**
  * Handle reports update - converts reports to announcements
- * @param {Array} reportIds - Array of report IDs to update
- * @param {Object} formData - Form data from modal
- * @param {number} feederId - Feeder ID
  */
 async function handleReportsUpdate(reportIds, formData, feederId) {
   console.log(`Updating ${reportIds.length} reports (converting to announcements):`, formData);
@@ -754,50 +651,38 @@ async function handleReportsUpdate(reportIds, formData, feederId) {
     return;
   }
 
-  // =================================================================
-  // ✅ MODIFICATION 2: Remove 'pictures' from announcementData
-  // =================================================================
   const announcementData = {
     feeder_id: feederId ? parseInt(feederId) : null,
     type: formData.outageType,
     cause: formData.cause || null,
     location: formData.location || null,
-    // pictures: formData.imageUrls.length > 0 ? formData.imageUrls : null, // <-- REMOVED
     areas_affected: formData.affectedAreas.length > 0 ? formData.affectedAreas : null,
     barangay: formData.affectedAreas.length > 0 ? formData.affectedAreas[0] : null,
     status: formData.status,
     description: formData.description || null,
     estimated_restoration_at: formData.eta || null,
-    scheduled_at: formData.scheduled_at || null, // ✅ NEW: Save scheduled date
+    scheduled_at: formData.scheduled_at || null, 
     latitude: formData.latitude,
     longitude: formData.longitude,
-    // dispatch_team: formData.dispatchTeam !== 'None' ? formData.dispatchTeam : null,
     created_at: new Date().toISOString()
   };
 
-  console.log('Creating announcement from reports:', announcementData);
-
   try {
-    // 1. Insert new announcement
     const { data, error } = await supabase
       .from('announcements')
       .insert([announcementData])
-      .select(); // Must .select() to get the ID of the new row
+      .select(); 
 
     if (error) {
       throw error;
     }
 
-    const newAnnouncement = data[0]; // Get the newly created announcement
-    console.log('Announcement created successfully:', newAnnouncement);
+    const newAnnouncement = data[0]; 
 
-    // 2. NEW LOGIC: Insert images into announcement_images table
     if (formData.imageUrls && formData.imageUrls.length > 0) {
       const imageInserts = formData.imageUrls.map(url => ({
         announcement_id: newAnnouncement.id,
         image_url: url
-        // We assume `image_url` is the correct column,
-        // not `pictures` in the `announcement_images` table
       }));
 
       const { error: imageError } = await supabase
@@ -805,17 +690,11 @@ async function handleReportsUpdate(reportIds, formData, feederId) {
         .insert(imageInserts);
 
       if (imageError) {
-        // Log the error but don't fail the whole operation,
-        // as the announcement itself was created.
         console.error('Error inserting announcement images:', imageError);
         window.showErrorPopup('Announcement created, but failed to save images.');
       }
     }
-    // =================================================================
-    // ✅ END MODIFICATION 2
-    // =================================================================
 
-    // 3. Now update the original reports to mark them as processed/announced
     if (reportIds.length > 0) {
       const { error: updateError } = await supabase
         .from('reports')
@@ -827,18 +706,14 @@ async function handleReportsUpdate(reportIds, formData, feederId) {
 
       if (updateError) {
         console.error('Error updating report status:', updateError);
-        // Don't throw - announcement was created successfully
       }
     }
 
     window.showSuccessPopup("Reports converted to announcement successfully!");
 
-    // Refresh reports list UI
     if (typeof window.applyFiltersAndRender === 'function') {
       window.applyFiltersAndRender();
     }
-
-    // Refresh MAP if present
     if (typeof window.loadAnnouncementsToMap === "function") {
       window.loadAnnouncementsToMap();
     }
@@ -860,47 +735,32 @@ async function handleOutagesUpdate(outageIds, formData, feederId) {
       return;
   }
 
-  // =================================================================
-  // ✅ MODIFICATION 3: Remove 'pictures' and add image sync logic
-  // =================================================================
-
-  // 1. Map form data for the 'announcements' table (NO images)
   const announcementData = {
       feeder_id: feederId ? parseInt(feederId) : null,
       type: formData.outageType,
       cause: formData.cause || null,
       location: formData.location || null,
-      // pictures: formData.imageUrls.length > 0 ? formData.imageUrls : null, // <-- REMOVED
       areas_affected: formData.affectedAreas.length > 0 ? formData.affectedAreas : null,
       barangay: formData.affectedAreas.length > 0 ? formData.affectedAreas[0] : null,
       status: formData.status,
       description: formData.description || null,
       estimated_restoration_at: formData.eta || null,
-      scheduled_at: formData.scheduled_at || null, // ✅ NEW: Save scheduled date
+      scheduled_at: formData.scheduled_at || null, 
       latitude: formData.latitude,  
       longitude: formData.longitude, 
-      updated_at: new Date().toISOString() // Manually set updated_at
+      updated_at: new Date().toISOString() 
   };
 
-  console.log('Updating announcements (main data):', announcementData);
-
   try {
-      // 2. Update the main announcement details
       const { data, error } = await supabase
           .from('announcements')
           .update(announcementData)
-          .in('id', outageIds); // Apply update to all selected IDs
+          .in('id', outageIds);
 
       if (error) {
           throw error;
       }
       
-      console.log('Supabase announcement update success:', data);
-      
-      // --- NEW LOGIC: Sync announcement_images ---
-      
-      // 3. Delete all old images for these announcements
-      // This ensures removed images are gone
       const { error: deleteError } = await supabase
           .from('announcement_images')
           .delete()
@@ -908,15 +768,12 @@ async function handleOutagesUpdate(outageIds, formData, feederId) {
       
       if (deleteError) {
           console.error('Error clearing old announcement images:', deleteError);
-          // Don't throw, just warn. Proceed to insert new ones.
       }
 
-      // 4. Prepare new image rows to insert
-      // formData.imageUrls contains the *complete* list of images
       if (formData.imageUrls && formData.imageUrls.length > 0) {
           const imageInserts = [];
-          for (const id of outageIds) { // Loop over each announcement being updated
-              for (const url of formData.imageUrls) { // Add all images for it
+          for (const id of outageIds) { 
+              for (const url of formData.imageUrls) { 
                   imageInserts.push({
                       announcement_id: id,
                       image_url: url
@@ -924,7 +781,6 @@ async function handleOutagesUpdate(outageIds, formData, feederId) {
               }
           }
 
-          // 5. Insert all new images in one batch
           if (imageInserts.length > 0) {
               const { error: insertError } = await supabase
                   .from('announcement_images')
@@ -932,24 +788,16 @@ async function handleOutagesUpdate(outageIds, formData, feederId) {
               
               if (insertError) {
                   console.error('Error inserting new announcement images:', insertError);
-                  // Log and show a partial success
                   window.showErrorPopup("Outage updated, but failed to save images.");
               }
           }
       }
-      // --- END NEW LOGIC ---
-      // =================================================================
-      // ✅ END MODIFICATION 3
-      // =================================================================
 
       window.showSuccessPopup("Outage updated successfully!");
 
-      // Refresh outages list UI
       if (typeof window.applyFiltersAndRender === 'function') {
           window.applyFiltersAndRender();
       }
-
-      // ✅ Also refresh MAP if present
       if (typeof window.loadAnnouncementsToMap === "function") {
           window.loadAnnouncementsToMap();
       }
@@ -959,12 +807,361 @@ async function handleOutagesUpdate(outageIds, formData, feederId) {
   }
 }
 
+// =================================================================
+// UPDATED PROFILE LOGIC (Correctly ported from Global.js)
+// =================================================================
+
+// Staged file for profile picture upload
+let stagedAvatarFile = null;
+
+// 1. Sync User Profile (Header & Sidebar)
+async function internalSyncUserProfile() {
+    if (!window.supabase) return;
+    const { data: { session }, error } = await supabase.auth.getSession();
+
+    const headerName = document.getElementById("adminName");
+    const headerImg = document.getElementById("adminProfile");
+    const dropdownEmail = document.querySelector("#profileDropdown p.text-gray-500");
+
+    if (error || !session) {
+        if (headerName) headerName.textContent = "GUEST";
+        return;
+    }
+
+    const user = session.user;
+    const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+
+    const firstName = profile?.first_name || '';
+    const lastName = profile?.last_name || '';
+    const displayName = firstName ? `${firstName} ${lastName}` : user.email.split('@')[0];
+    const avatarUrl = profile?.profile_picture || "https://via.placeholder.com/150";
+
+    if (headerName) headerName.textContent = displayName.toUpperCase();
+    if (headerImg) headerImg.src = avatarUrl;
+    if (dropdownEmail) dropdownEmail.textContent = user.email;
+}
+
+// 2. Open Profile Modal (Dynamic)
+async function showProfileModal() {
+    stagedAvatarFile = null;
+    let profile = {};
+    
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            window.showErrorPopup("Please log in to edit your profile");
+            return;
+        }
+
+        const { data: profileData } = await supabase
+            .from('profiles')
+            .select('first_name, last_name, mobile, profile_picture') 
+            .eq('id', user.id)
+            .single();
+
+        profile = profileData || {};
+        const avatarSrc = profile.profile_picture || 'https://via.placeholder.com/150';
+
+        // Create overlay
+        const overlay = document.createElement('div');
+        overlay.id = 'profile-modal-overlay';
+        overlay.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000]';
+        overlay.innerHTML = `
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4 overflow-hidden border border-gray-200 dark:border-gray-700">
+                <div class="flex justify-between items-center p-4 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+                    <h2 class="text-lg font-bold text-gray-800 dark:text-gray-100">Edit Profile</h2>
+                    <button id="cancel-profile" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                        <span class="material-icons">close</span>
+                    </button>
+                </div>
+                
+                <div class="p-6 max-h-[80vh] overflow-y-auto">
+                    <div class="flex flex-col items-center mb-6">
+                        <div class="relative group cursor-pointer">
+                            <img id="profile-image-circle" src="${avatarSrc}" alt="Profile" 
+                                 class="w-24 h-24 rounded-full object-cover border-4 border-white dark:border-gray-600 shadow-md transition-opacity group-hover:opacity-80">
+                            <div class="absolute inset-0 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 bg-black bg-opacity-30">
+                                <span class="material-icons text-white">camera_alt</span>
+                            </div>
+                        </div>
+                        <input type="file" id="profile-image-input" accept="image/*" class="hidden">
+                        <button id="update-image-btn" type="button" class="mt-2 text-sm text-blue-600 font-medium hover:underline dark:text-blue-400">
+                            Change Photo
+                        </button>
+                    </div>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
+                            <input type="email" value="${user.email || ''}" disabled 
+                                   class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed">
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">First Name</label>
+                                <input type="text" id="profile-first-name" value="${profile.first_name || ''}" 
+                                       class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Last Name</label>
+                                <input type="text" id="profile-last-name" value="${profile.last_name || ''}" 
+                                       class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500">
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Mobile</label>
+                            <input type="tel" id="profile-mobile" value="${profile.mobile || ''}" 
+                                   class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white focus:ring-2 focus:ring-blue-500">
+                        </div>
+
+                        <div class="pt-2">
+                            <label class="flex items-center space-x-2 cursor-pointer">
+                                <input type="checkbox" id="toggle-password-update" class="form-checkbox text-blue-600 rounded">
+                                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Change Password</span>
+                            </label>
+                            <div id="password-update-section" class="hidden mt-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded border dark:border-gray-600">
+                                <div class="mb-3">
+                                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">New Password</label>
+                                    <input type="password" id="profile-new-password" placeholder="Min. 6 characters"
+                                           class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Confirm Password</label>
+                                    <input type="password" id="profile-confirm-password" placeholder="Confirm new password"
+                                           class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white text-sm">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="p-4 border-t dark:border-gray-700 flex justify-end bg-gray-50 dark:bg-gray-900">
+                    <button id="save-profile" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium shadow-sm transition">
+                        Save Changes
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        // Events
+        const imgCircle = document.getElementById('profile-image-circle');
+        const imgBtn = document.getElementById('update-image-btn');
+        const imgInput = document.getElementById('profile-image-input');
+        
+        const triggerImg = () => imgInput.click();
+        imgCircle.addEventListener('click', triggerImg);
+        imgBtn.addEventListener('click', triggerImg);
+        imgInput.addEventListener('change', previewProfileImage);
+
+        document.getElementById('toggle-password-update').addEventListener('change', (e) => {
+            const section = document.getElementById('password-update-section');
+            e.target.checked ? section.classList.remove('hidden') : section.classList.add('hidden');
+        });
+
+        document.getElementById('save-profile').addEventListener('click', () => saveUserProfile(profile)); 
+        
+        const closeModal = () => { if(overlay) overlay.remove(); stagedAvatarFile = null; };
+        document.getElementById('cancel-profile').addEventListener('click', closeModal);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+
+    } catch (err) {
+        console.error("Error loading profile:", err);
+        window.showErrorPopup(`Failed to load profile: ${err.message}`);
+    }
+}
+
+// 3. Preview Image
+function previewProfileImage(event) {
+    const input = event.target;
+    if (input.files && input.files[0]) {
+        const file = input.files[0];
+        if (!file.type.startsWith('image/')) {
+            window.showErrorPopup("Please select an image file.");
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            window.showErrorPopup("Image is too large (Max 5MB).");
+            return;
+        }
+        stagedAvatarFile = file;
+        const reader = new FileReader();
+        reader.onload = (e) => { document.getElementById('profile-image-circle').src = e.target.result; };
+        reader.readAsDataURL(file);
+    }
+}
+
+// 4. Gather Data & Confirm
+async function saveUserProfile(originalProfile) {
+    const firstName = document.getElementById('profile-first-name')?.value;
+    const lastName = document.getElementById('profile-last-name')?.value;
+    const mobile = document.getElementById('profile-mobile')?.value;
+    const newPassword = document.getElementById('profile-new-password')?.value;
+    const confirmPassword = document.getElementById('profile-confirm-password')?.value;
+    const isUpdatingPassword = document.getElementById('toggle-password-update')?.checked;
+
+    const profileUpdates = { first_name: firstName, last_name: lastName, mobile: mobile };
+    let authUpdates = {};
+
+    if (isUpdatingPassword) {
+        if (!newPassword || newPassword.length < 6) { window.showErrorPopup("New password must be at least 6 characters."); return; }
+        if (newPassword !== confirmPassword) { window.showErrorPopup("New passwords do not match."); return; }
+        authUpdates.password = newPassword;
+    }
+
+    if (
+        profileUpdates.first_name === (originalProfile.first_name || '') &&
+        profileUpdates.last_name === (originalProfile.last_name || '') &&
+        profileUpdates.mobile === (originalProfile.mobile || '') &&
+        Object.keys(authUpdates).length === 0 &&
+        !stagedAvatarFile
+    ) {
+        window.showSuccessPopup("No changes to save.");
+        return;
+    }
+
+    showPasswordConfirmModal({ profileUpdates, authUpdates, avatarFile: stagedAvatarFile });
+}
+
+// 5. Password Confirmation Modal
+function showPasswordConfirmModal(updates) {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[10001]';
+    overlay.innerHTML = `
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-sm p-6 border border-gray-200 dark:border-gray-700">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-2">Confirm Changes</h3>
+            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">Please enter your current password to save changes.</p>
+            
+            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Current Password</label>
+            <input type="password" id="current-password-confirm" 
+                   class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded dark:bg-gray-700 dark:text-white mb-2">
+            
+            <p id="confirm-error-msg" class="text-red-500 text-xs hidden mb-4"></p>
+            
+            <div class="flex justify-end space-x-3 mt-4">
+                <button id="cancel-confirm" class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition">Cancel</button>
+                <button id="confirm-save" class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition font-medium">Confirm & Save</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const confirmBtn = overlay.querySelector('#confirm-save');
+    const cancelBtn = overlay.querySelector('#cancel-confirm');
+    const errorMsg = overlay.querySelector('#confirm-error-msg');
+    const passwordInput = overlay.querySelector('#current-password-confirm');
+
+    const close = () => overlay.remove();
+    cancelBtn.addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+    confirmBtn.addEventListener('click', async () => {
+        const currentPassword = passwordInput.value;
+        if (!currentPassword) {
+            errorMsg.textContent = "Please enter your password.";
+            errorMsg.classList.remove('hidden');
+            return;
+        }
+
+        errorMsg.classList.add('hidden');
+        confirmBtn.textContent = 'Saving...';
+        confirmBtn.disabled = true;
+
+        await executeProfileUpdates(currentPassword, updates, close);
+        
+        if (document.body.contains(overlay)) {
+            confirmBtn.textContent = 'Confirm & Save';
+            confirmBtn.disabled = false;
+        }
+    });
+}
+
+// 6. Execute Updates (Re-Auth, Upload, Upsert)
+async function executeProfileUpdates(currentPassword, updates, closeConfirmModal) {
+    const errorMsg = document.getElementById('confirm-error-msg');
+    
+    try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("User not found.");
+
+        // A. Re-authenticate
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+            email: user.email,
+            password: currentPassword,
+        });
+
+        if (signInError) {
+            errorMsg.textContent = "Incorrect password.";
+            errorMsg.classList.remove('hidden');
+            return;
+        }
+
+        // B. Upload Avatar
+        let newAvatarUrl = null;
+        if (updates.avatarFile) {
+            const fileExt = updates.avatarFile.name.split('.').pop();
+            // IMPORTANT: Upload to user-specific folder
+            const filePath = `profile_pictures/${user.id}/avatar-${Date.now()}.${fileExt}`;
+            
+            const { error: uploadError } = await supabase.storage
+                .from('profile_pictures')
+                .upload(filePath, updates.avatarFile, { upsert: true });
+
+            if (uploadError) throw uploadError;
+
+            const { data: publicUrlData } = supabase.storage
+                .from('profile_pictures')
+                .getPublicUrl(filePath);
+            
+            newAvatarUrl = publicUrlData.publicUrl;
+            updates.profileUpdates.profile_picture = newAvatarUrl;
+        }
+
+        // C. Update Profile Table
+        updates.profileUpdates.updated_at = new Date().toISOString();
+        const { error: profileError } = await supabase
+            .from('profiles')
+            .upsert({ ...updates.profileUpdates, id: user.id });
+
+        if (profileError) throw profileError;
+
+        // D. Update Password (Auth)
+        if (updates.authUpdates.password) {
+            const { error: passError } = await supabase.auth.updateUser({ password: updates.authUpdates.password });
+            if (passError) throw passError;
+        }
+
+        // E. Sync Meta
+        const authMetaUpdates = {};
+        if (updates.profileUpdates.first_name) authMetaUpdates.first_name = updates.profileUpdates.first_name;
+        if (updates.profileUpdates.last_name) authMetaUpdates.last_name = updates.profileUpdates.last_name;
+        if (Object.keys(authMetaUpdates).length > 0) {
+            await supabase.auth.updateUser({ data: authMetaUpdates });
+        }
+
+        window.showSuccessPopup("Profile updated successfully!");
+        closeConfirmModal(); // Close password modal
+        
+        const mainModalOverlay = document.getElementById('profile-modal-overlay');
+        if (mainModalOverlay) mainModalOverlay.remove(); // Close main modal
+
+        internalSyncUserProfile(); // Refresh Admin Header
+
+    } catch (err) {
+        console.error("Error saving profile:", err);
+        errorMsg.textContent = `Error: ${err.message}`;
+        errorMsg.classList.remove('hidden');
+    }
+}
+
 // --- MAIN SCRIPT LOGIC ---
 
 document.addEventListener("DOMContentLoaded", () => {
-  console.log("shared.js v10 (Schema Update): DOMContentLoaded");
+  console.log("shared.js v12 (Fixed Profile): DOMContentLoaded");
 
-  // --- Universal Filter Callback (from sharedog.js) ---
+  // --- Universal Filter Callback ---
   const callPageFilter = () => {
       if (typeof window.applyFilters === "function") {
           window.applyFilters();
@@ -973,7 +1170,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
   };
 
-  // --- Sidebar Highlighting (from sharedog.js) ---
+  // --- Sidebar Highlighting (Untouched) ---
   try {
     const links = document.querySelectorAll(".sidebar-link");
     const pathSegments = window.location.pathname.split('/');
@@ -997,7 +1194,7 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("shared.js: Error during sidebar highlighting:", error);
   }
 
-  // --- Date Dropdown Logic (from sharedog.js) ---
+  // --- Date Dropdown Logic (Untouched) ---
   const dateBtn = document.getElementById("dateDropdownBtn");
   if (dateBtn) {
     try {
@@ -1042,24 +1239,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // --- Feeder Filter UI Logic (from sharedog.js) ---
+  // --- Feeder Filter UI Logic (Untouched) ---
 const feederBtn = document.getElementById("feederFilterBtn");
 const feederPopup = document.getElementById("feederPopup");
 
 if (feederBtn && feederPopup) {
-    // This part is correct and handles opening/closing
     window.setupDropdownToggle("feederFilterBtn", "feederPopup");
-
     const feederClearAll = document.getElementById("feederClearAll");
     const feederSelectAll = document.getElementById("feederSelectAll");
 
-    /**
-     * Helper function to set the visual state of all buttons.
-     * This function now queries for the buttons *every time it runs*,
-     * so it works on the currently visible buttons.
-     */
     const setTogglesState = (select) => {
-        // Find the buttons *now*, not on page load
         const feederToggles = feederPopup.querySelectorAll(".feeder-toggle");
         
         feederToggles.forEach((btn) => {
@@ -1071,31 +1260,24 @@ if (feederBtn && feederPopup) {
                 btn.classList.add("bg-gray-200", "dark:bg-gray-700");
             }
         });
-        callPageFilter(); // Call the page-specific filter function
+        callPageFilter(); 
     };
 
-    // --- NEW: Event Delegation ---
-    // Listen for all clicks on the popup container
     feederPopup.addEventListener("click", (e) => {
-        
-        // Check if the clicked item (e.target) is a feeder-toggle button
         if (e.target.classList.contains("feeder-toggle")) {
-            // It is! Toggle its classes.
             e.target.classList.toggle("bg-blue-500");
             e.target.classList.toggle("text-white");
             e.target.classList.toggle("bg-gray-200");
             e.target.classList.toggle("dark:bg-gray-700");
-            callPageFilter(); // Call the page-specific filter function
+            callPageFilter(); 
         }
     });
 
-    // These buttons exist on page load, so their listeners are fine.
-    // They will now work because setTogglesState() finds buttons dynamically.
     feederClearAll?.addEventListener("click", () => setTogglesState(false));
     feederSelectAll?.addEventListener("click", () => setTogglesState(true));
 }
 
- // --- Search Input Logic (from sharedog.js) ---
+ // --- Search Input Logic (Untouched) ---
   const searchInput = document.getElementById("locationSearch");
   if (searchInput) {
       let debounceTimer;
@@ -1106,118 +1288,29 @@ if (feederBtn && feederPopup) {
   }
 
   // =================================================================
-  // UPDATED PROFILE LOGIC (Matches public.profiles schema)
+  // REPLACED PROFILE LOGIC INITIALIZATION
   // =================================================================
 
-  // --- 1. Define the Sync Function (Fetches from DB) ---
-  async function internalSyncUserProfile() {
-      if (!window.supabase) return;
-      
-      // Get active session
-      const { data: { session }, error } = await supabase.auth.getSession();
-      
-      // UI Elements (Header/Sidebar)
-      const headerName = document.getElementById("adminName");
-      const headerImg = document.getElementById("adminProfile");
-      const dropdownEmail = document.querySelector("#profileDropdown p.text-gray-500");
-      
-      // UI Elements (Modal Inputs)
-      const modalPreview = document.getElementById("modalProfilePreview");
-      const emailInput = document.getElementById("profileEmailInput");
-      const firstNameInput = document.getElementById("firstNameInput");
-      const lastNameInput = document.getElementById("lastNameInput");
-      const mobileInput = document.getElementById("mobileInput");
-
-      if (error || !session) {
-          if (headerName) headerName.textContent = "GUEST";
-          return;
-      }
-
-      const user = session.user;
-      
-      // 1. Fetch details from public.profiles
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-      if (profileError && profileError.code !== 'PGRST116') {
-          console.error("Error fetching profile:", profileError);
-      }
-
-      // 2. Determine Display Values
-      const firstName = profile?.first_name || '';
-      const lastName = profile?.last_name || '';
-      const displayName = firstName ? `${firstName} ${lastName}` : user.email.split('@')[0];
-      const avatarUrl = profile?.profile_picture || "https://via.placeholder.com/150";
-
-      // 3. Update Global UI (Header/Sidebar)
-      if (headerName) headerName.textContent = displayName.toUpperCase();
-      if (headerImg) headerImg.src = avatarUrl;
-      if (dropdownEmail) dropdownEmail.textContent = user.email;
-
-      // 4. Update Modal Inputs (Pre-fill)
-      if (emailInput) emailInput.value = user.email; // Auth email is source of truth
-      if (firstNameInput) firstNameInput.value = firstName;
-      if (lastNameInput) lastNameInput.value = lastName;
-      if (mobileInput) mobileInput.value = profile?.mobile || '';
-      if (modalPreview) modalPreview.src = avatarUrl;
-  }
-
-  // --- 2. Run Sync Immediately on Load ---
+  // 1. Sync data immediately
   internalSyncUserProfile();
 
-  // --- 3. Modal Open/Close Logic ---
+  // 2. Setup Dropdown Toggle
   window.setupDropdownToggle("profileTrigger", "profileDropdown");
 
+  // 3. Setup "Edit Profile" Button to open new Dynamic Modal
   const openProfileModalBtn = document.getElementById('openProfileModalBtn');
-  const profileModal = document.getElementById('profileModal');
-  const closeProfileModalBtn = document.getElementById('closeProfileModalBtn');
-  const cancelUpdateBtn = document.getElementById('cancelUpdateBtn');
-  const profileUpdateForm = document.getElementById('profileUpdateForm');
-
-  const openModal = () => {
-      if (profileModal) {
-          profileModal.classList.remove('hidden');
-          profileModal.classList.add('flex');
-          internalSyncUserProfile(); // Refresh data from DB when opening
+  if (openProfileModalBtn) {
+      openProfileModalBtn.addEventListener('click', (e) => { 
+          e.preventDefault(); 
+          // Close the dropdown if it's open
           const dropdown = document.getElementById('profileDropdown');
           if (dropdown) dropdown.classList.add('hidden');
-      }
-  };
-
-  const closeModal = () => {
-      if (profileModal) {
-          profileModal.classList.add('hidden');
-          profileModal.classList.remove('flex');
-          // Clear password fields on close for security
-          document.getElementById('newPasswordInput').value = '';
-          document.getElementById('confirmPasswordInput').value = '';
-      }
-  };
-
-  if (openProfileModalBtn) openProfileModalBtn.addEventListener('click', (e) => { e.preventDefault(); openModal(); });
-  if (closeProfileModalBtn) closeProfileModalBtn.addEventListener('click', closeModal);
-  if (cancelUpdateBtn) cancelUpdateBtn.addEventListener('click', closeModal);
-
-  // --- 4. Image Preview Logic ---
-  const profilePicInput = document.getElementById('profilePictureInput');
-  const modalPreview = document.getElementById('modalProfilePreview');
-  
-  if (profilePicInput && modalPreview) {
-      profilePicInput.addEventListener('change', function(e) {
-          if (e.target.files && e.target.files[0]) {
-              const reader = new FileReader();
-              reader.onload = function(e) {
-                  modalPreview.src = e.target.result;
-              }
-              reader.readAsDataURL(e.target.files[0]);
-          }
+          // Open the new modal
+          showProfileModal(); 
       });
   }
 
-  // --- 5. Logout Logic ---
+  // --- Logout Logic ---
   const logoutBtn = document.getElementById('logoutBtn');
   if (logoutBtn) {
       logoutBtn.addEventListener('click', async (e) => {
@@ -1226,93 +1319,6 @@ if (feederBtn && feederPopup) {
               await supabase.auth.signOut();
               localStorage.clear();
               window.location.href = 'login.html';
-          }
-      });
-  }
-
-  // --- 6. Form Submission (Save to DB) ---
-  if (profileUpdateForm) {
-      profileUpdateForm.addEventListener('submit', async (e) => {
-          e.preventDefault();
-          
-          const saveBtn = document.getElementById('saveProfileBtn');
-          const originalBtnText = saveBtn.textContent;
-          saveBtn.textContent = 'Saving...';
-          saveBtn.disabled = true;
-
-          try {
-              const { data: { user } } = await supabase.auth.getUser();
-              if (!user) throw new Error("No authenticated user found.");
-
-              const firstName = document.getElementById('firstNameInput').value.trim();
-              const lastName = document.getElementById('lastNameInput').value.trim();
-              const mobile = document.getElementById('mobileInput').value.trim();
-              const newPass = document.getElementById('newPasswordInput').value;
-              const confirmPass = document.getElementById('confirmPasswordInput').value;
-              const fileInput = document.getElementById('profilePictureInput');
-
-              // A. Handle Image Upload (if file selected)
-              let profilePictureUrl = null;
-              
-              if (fileInput.files && fileInput.files[0]) {
-                  const file = fileInput.files[0];
-                  const fileExt = file.name.split('.').pop();
-                  const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-                  const filePath = `${fileName}`;
-
-                  // Upload to 'profile_pictures' bucket
-                  const { error: uploadError } = await supabase.storage
-                      .from('profile_pictures') 
-                      .upload(filePath, file, { upsert: true });
-
-                  if (uploadError) throw uploadError;
-
-                  // Get Public URL
-                  const { data: { publicUrl } } = supabase.storage
-                      .from('profile_pictures')
-                      .getPublicUrl(filePath);
-                  
-                  profilePictureUrl = publicUrl;
-              }
-
-              // B. Update 'profiles' table
-              const updates = {
-                  id: user.id, // Ensure ID is present for upsert
-                  first_name: firstName,
-                  last_name: lastName,
-                  mobile: mobile,
-                  updated_at: new Date().toISOString()
-              };
-
-              if (profilePictureUrl) {
-                  updates.profile_picture = profilePictureUrl;
-              }
-
-              const { error: dbError } = await supabase
-                  .from('profiles')
-                  .upsert(updates);
-
-              if (dbError) throw dbError;
-
-              // C. Handle Password Update (Only if filled)
-              if (newPass) {
-                  if (newPass !== confirmPass) {
-                      throw new Error("Passwords do not match.");
-                  }
-                  const { error: passError } = await supabase.auth.updateUser({ password: newPass });
-                  if (passError) throw passError;
-              }
-
-              window.showSuccessPopup("Profile updated successfully!");
-              await internalSyncUserProfile(); // Refresh UI
-              closeModal();
-
-          } catch (error) {
-              console.error(error);
-              window.showErrorPopup(error.message || "Failed to update profile.");
-          } finally {
-              saveBtn.textContent = originalBtnText;
-              saveBtn.disabled = false;
           }
       });
   }
