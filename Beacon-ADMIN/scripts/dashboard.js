@@ -1,6 +1,12 @@
-// DASHBOARD.JS - Final Fixes: Centered Logo, Safe Recommendations, Robust Heatmap
+// DASHBOARD.JS - Final Fixes: Date Range Filter, Centered Logo, Safe Recommendations, Robust Heatmap
 
 document.addEventListener("DOMContentLoaded", () => {
+  // --- Global State ---
+  // Default: Past 30 days
+  let currentEndDate = new Date();
+  let currentStartDate = new Date();
+  currentStartDate.setDate(currentEndDate.getDate() - 30);
+
   // --- Global Chart Instances ---
   let feederChartInstance = null;
   let restorationChartInstance = null;
@@ -30,12 +36,26 @@ document.addEventListener("DOMContentLoaded", () => {
   const forecastBarangayUpdated = document.getElementById("forecastBarangayUpdated");
   const forecastRestorationUpdated = document.getElementById("forecastRestorationUpdated");
 
-  // Date Filter Elements
-  const dateDropdownBtn = document.getElementById("dateDropdownBtn");
-  const calendarDropdown = document.getElementById("calendarDropdown");
-  const applyDateBtn = document.getElementById("applyDateBtn");
-  const calendarInput = document.getElementById("calendarInput");
-  const selectedDateLabel = document.getElementById("selectedDate");
+  // Date Filter Elements (New Range Logic)
+  const dateRangeBtn = document.getElementById("dateRangeBtn");
+  const dateRangeDropdown = document.getElementById("dateRangeDropdown");
+  const rangeStartInput = document.getElementById("rangeStart");
+  const rangeEndInput = document.getElementById("rangeEnd");
+  const applyDateRangeBtn = document.getElementById("applyDateRangeBtn");
+  const dateRangeLabel = document.getElementById("dateRangeLabel");
+
+  // Initialize Inputs
+  if (rangeStartInput && rangeEndInput) {
+    rangeStartInput.value = currentStartDate.toISOString().split("T")[0];
+    rangeEndInput.value = currentEndDate.toISOString().split("T")[0];
+    updateDateLabel();
+  }
+
+  function updateDateLabel() {
+    if (dateRangeLabel) {
+      dateRangeLabel.textContent = `${rangeStartInput.value} - ${rangeEndInput.value}`;
+    }
+  }
 
   // 1. MAP HEATMAP LOGIC
   const map = L.map("map").setView([16.4023, 120.5960], 13);
@@ -46,7 +66,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let heatLayer = null;
   // Default to "pending" to show unaddressed reports immediately
   let heatFilter = "pending"; 
-  
+  let heatmapUseDateRange = false;
+
   const heatFilterLabel = document.querySelector("#heatmapFilterBtn span:nth-child(4)");
   if (heatFilterLabel) heatFilterLabel.textContent = "Pending only";
 
@@ -55,14 +76,21 @@ document.addEventListener("DOMContentLoaded", () => {
     // Increase weight/intensity for visibility
     const STATUS_WEIGHT = { pending: 1.5, reported: 2, ongoing: 3 };
 
+    const sDate = `${toISODate(currentStartDate)}T00:00:00Z`;
+    const eDate = `${toISODate(currentEndDate)}T23:59:59Z`;
+
     try {
       // 1. Fetch PENDING reports (The unaddressed ones from 'reports' table)
       // FIX: Expanded status check to ensure all "new/pending" variations are caught
       if (heatFilter === "pending" || heatFilter === "all") {
-        const { data: reportsData, error: reportsError } = await supabase
+        let reportsQuery = supabase
           .from("reports")
           .select("latitude, longitude, status")
-          .in("status", ["Pending", "pending", "New", "new", "Open", "open"]); 
+          .in("status", ["Pending", "pending", "New", "new", "Open", "open"]);
+        if (heatmapUseDateRange) {
+          reportsQuery = reportsQuery.gte("created_at", sDate).lte("created_at", eDate);
+        }
+        const { data: reportsData, error: reportsError } = await reportsQuery; 
 
         if (!reportsError && reportsData) {
           const points = reportsData
@@ -78,10 +106,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // 2. Fetch REPORTED/ONGOING (From 'announcements' table)
       if (heatFilter === "reportedongoing" || heatFilter === "all") {
-        const { data: annData, error: annError } = await supabase
+        let annQuery = supabase
           .from("announcements")
           .select("latitude, longitude, status")
           .in("status", ["Ongoing", "Reported"]);
+        if (heatmapUseDateRange) {
+          annQuery = annQuery.gte("created_at", sDate).lte("created_at", eDate);
+        }
+        const { data: annData, error: annError } = await annQuery;
 
         if (!annError && annData) {
           const points = annData
@@ -117,6 +149,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const hFilterBtn = document.getElementById("heatmapFilterBtn");
   const hFilterPopup = document.getElementById("heatmapFilterPopup");
   const hFilterRadios = hFilterPopup ? hFilterPopup.querySelectorAll("input[name='heatmapFilter']") : [];
+  const hUseRangeCheckbox = hFilterPopup ? hFilterPopup.querySelector("#heatmapUseDateRange") : null;
 
   if (hFilterBtn) {
     hFilterBtn.addEventListener("click", (e) => {
@@ -140,137 +173,172 @@ document.addEventListener("DOMContentLoaded", () => {
         hFilterPopup.classList.add("hidden");
       });
     });
+
+    if (hUseRangeCheckbox) {
+      hUseRangeCheckbox.addEventListener("change", (e) => {
+        heatmapUseDateRange = e.target.checked;
+        fetchHeatmapData();
+      });
+    }
   }
 
-  // 2. DATE FILTER STATS
-  if (dateDropdownBtn && calendarDropdown) {
-    dateDropdownBtn.addEventListener("click", (e) => {
+  // 2. DATE RANGE FILTER EVENTS
+  if (dateRangeBtn && dateRangeDropdown) {
+    dateRangeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      calendarDropdown.classList.toggle("hidden");
+      dateRangeDropdown.classList.toggle("hidden");
     });
 
     document.addEventListener("click", (e) => {
-      if (!dateDropdownBtn.contains(e.target) && !calendarDropdown.contains(e.target)) {
-        calendarDropdown.classList.add("hidden");
+      if (!dateRangeBtn.contains(e.target) && !dateRangeDropdown.contains(e.target)) {
+        dateRangeDropdown.classList.add("hidden");
       }
     });
   }
 
-  if (applyDateBtn && calendarInput) {
-    applyDateBtn.addEventListener("click", () => {
-      const selectedDate = calendarInput.value;
-      if (selectedDate) {
-        selectedDateLabel.textContent = selectedDate;
-        calendarDropdown.classList.add("hidden");
-        loadDashboardStats(selectedDate);
+  if (applyDateRangeBtn) {
+    applyDateRangeBtn.addEventListener("click", () => {
+      const sVal = rangeStartInput.value;
+      const eVal = rangeEndInput.value;
+      
+      if (sVal && eVal) {
+        currentStartDate = new Date(sVal);
+        currentEndDate = new Date(eVal);
+        updateDateLabel();
+        dateRangeDropdown.classList.add("hidden");
+        
+        // Refresh all data with new range
+        refreshAllData();
       }
     });
   }
 
-  async function loadDashboardStats(targetDateStr = null) {
-  if (!window.supabase) return;
-
-  try {
-    let targetDate = targetDateStr ? new Date(targetDateStr) : new Date();
-    let compareDate = new Date(targetDate);
-    compareDate.setDate(targetDate.getDate() - 1);
-
-    const formatDate = (d) => d.toISOString().split("T")[0];
-    const targetStart = `${formatDate(targetDate)}T00:00:00Z`;
-    const targetEnd = `${formatDate(targetDate)}T23:59:59Z`;
-    const compareStart = `${formatDate(compareDate)}T00:00:00Z`;
-    const compareEnd = `${formatDate(compareDate)}T23:59:59Z`;
-
-    const getCount = async (table, statusCol, statusVal, dateCol, start, end) => {
-      let query = supabase.from(table).select("id", { count: "exact", head: true });
-      if (statusCol && statusVal) query = query.eq(statusCol, statusVal);
-      query = query.gte(dateCol, start).lte(dateCol, end);
-      const { count, error } = await query;
-      if (error) console.error(`Error fetching count from ${table}:`, error);
-      return count || 0;
-    };
-
-    const getCountMultipleStatus = async (table, statusCol, statusVals, dateCol, start, end) => {
-      let query = supabase.from(table).select("id", { count: "exact", head: true });
-      query = query.in(statusCol, statusVals);
-      query = query.gte(dateCol, start).lte(dateCol, end);
-      const { count, error } = await query;
-      if (error) console.error(`Error fetching multi-status count from ${table}:`, error);
-      return count || 0;
-    };
-
-    // Total reports = count of pending reports from reports table only
-    const totalToday = await getCount("reports", "status", "pending", "created_at", targetStart, targetEnd);
-    const totalYest = await getCount("reports", "status", "pending", "created_at", compareStart, compareEnd);
-
-    // Active outages = count of announcements with status Reported or Ongoing
-    const activeToday = await getCountMultipleStatus(
-      "announcements",
-      "status",
-      ["Reported", "Ongoing"],
-      "created_at",
-      targetStart,
-      targetEnd
-    );
-    const activeYest = await getCountMultipleStatus(
-      "announcements",
-      "status",
-      ["Reported", "Ongoing"],
-      "created_at",
-      compareStart,
-      compareEnd
-    );
-
-    // Completed repairs
-    const completedToday = await getCount(
-      "announcements",
-      "status",
-      "Completed",
-      "restored_at",
-      targetStart,
-      targetEnd
-    );
-    const completedYest = await getCount(
-      "announcements",
-      "status",
-      "Completed",
-      "restored_at",
-      compareStart,
-      compareEnd
-    );
-
-    const updateTile = (valId, trendId, iconId, current, previous) => {
-      document.getElementById(valId).textContent = current;
-      let percent = 0;
-      if (previous > 0) {
-        percent = ((current - previous) / previous) * 100;
-      } else if (current > 0) {
-        percent = 100;
-      } else {
-        percent = 0;
-      }
-
-      const isGood = valId === "value-completed" ? percent >= 0 : percent <= 0;
-      const iconEl = document.getElementById(iconId);
-      const trendEl = document.getElementById(trendId);
-
-      iconEl.textContent = percent === 0 ? "horizontal_rule" : percent > 0 ? "arrow_upward" : "arrow_downward";
-
-      const colorClass = percent === 0 ? "text-gray-500" : isGood ? "text-green-600" : "text-red-600";
-      iconEl.className = `material-icons text-sm ${colorClass}`;
-
-      const percentSpan = trendEl.querySelector("span:last-child");
-      percentSpan.textContent = `${Math.abs(percent).toFixed(1)}%`;
-      percentSpan.className = `text-xs font-bold ${colorClass}`;
-    };
-
-    updateTile("value-total", "trend-total", "icon-total", totalToday, totalYest);
-    updateTile("value-active", "trend-active", "icon-active", activeToday, activeYest);
-    updateTile("value-completed", "trend-completed", "icon-completed", completedToday, completedYest);
-  } catch (error) {
-    console.error("Stats Error", error);
+  async function refreshAllData() {
+    await Promise.all([
+      loadDashboardStats(),
+      updateFeederChart(),
+      updateRestorationChart(),
+      loadAdvancedAnalytics(),
+      loadRecentReports()
+    ]);
   }
-}
+
+  // Format Helper
+  const toISODate = (d) => d.toISOString().split("T")[0];
+
+  async function loadDashboardStats() {
+    if (!window.supabase) return;
+
+    try {
+      const sDateStr = toISODate(currentStartDate);
+      const eDateStr = toISODate(currentEndDate);
+
+      // Current Period
+      const targetStart = `${sDateStr}T00:00:00Z`;
+      const targetEnd = `${eDateStr}T23:59:59Z`;
+
+      // Comparison Period (Same duration immediately before)
+      const diffTime = Math.abs(currentEndDate - currentStartDate);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; 
+      
+      const prevEndObj = new Date(currentStartDate);
+      prevEndObj.setDate(prevEndObj.getDate() - 1);
+      const prevStartObj = new Date(prevEndObj);
+      prevStartObj.setDate(prevStartObj.getDate() - diffDays + 1);
+
+      const compareStart = `${toISODate(prevStartObj)}T00:00:00Z`;
+      const compareEnd = `${toISODate(prevEndObj)}T23:59:59Z`;
+
+      const getCount = async (table, statusCol, statusVal, dateCol, start, end) => {
+        let query = supabase.from(table).select("id", { count: "exact", head: true });
+        if (statusCol && statusVal) query = query.eq(statusCol, statusVal);
+        query = query.gte(dateCol, start).lte(dateCol, end);
+        const { count, error } = await query;
+        if (error) console.error(`Error fetching count from ${table}:`, error);
+        return count || 0;
+      };
+
+      const getCountMultipleStatus = async (table, statusCol, statusVals, dateCol, start, end) => {
+        let query = supabase.from(table).select("id", { count: "exact", head: true });
+        query = query.in(statusCol, statusVals);
+        query = query.gte(dateCol, start).lte(dateCol, end);
+        const { count, error } = await query;
+        if (error) console.error(`Error fetching multi-status count from ${table}:`, error);
+        return count || 0;
+      };
+
+      // Total reports = count of pending reports from reports table only
+      const totalSelected = await getCount("reports", "status", "pending", "created_at", targetStart, targetEnd);
+      const totalPrev = await getCount("reports", "status", "pending", "created_at", compareStart, compareEnd);
+
+      // Active outages = count of announcements with status Reported or Ongoing
+      const activeSelected = await getCountMultipleStatus(
+        "announcements",
+        "status",
+        ["Reported", "Ongoing"],
+        "created_at",
+        targetStart,
+        targetEnd
+      );
+      const activePrev = await getCountMultipleStatus(
+        "announcements",
+        "status",
+        ["Reported", "Ongoing"],
+        "created_at",
+        compareStart,
+        compareEnd
+      );
+
+      // Completed repairs
+      const completedSelected = await getCount(
+        "announcements",
+        "status",
+        "Completed",
+        "restored_at",
+        targetStart,
+        targetEnd
+      );
+      const completedPrev = await getCount(
+        "announcements",
+        "status",
+        "Completed",
+        "restored_at",
+        compareStart,
+        compareEnd
+      );
+
+      const updateTile = (valId, trendId, iconId, current, previous) => {
+        document.getElementById(valId).textContent = current;
+        let percent = 0;
+        if (previous > 0) {
+          percent = ((current - previous) / previous) * 100;
+        } else if (current > 0) {
+          percent = 100;
+        } else {
+          percent = 0;
+        }
+
+        const isGood = valId === "value-completed" ? percent >= 0 : percent <= 0;
+        const iconEl = document.getElementById(iconId);
+        const trendEl = document.getElementById(trendId);
+
+        iconEl.textContent = percent === 0 ? "horizontal_rule" : percent > 0 ? "arrow_upward" : "arrow_downward";
+
+        const colorClass = percent === 0 ? "text-gray-500" : isGood ? "text-green-600" : "text-red-600";
+        iconEl.className = `material-icons text-sm ${colorClass}`;
+
+        const percentSpan = trendEl.querySelector("span:last-child");
+        percentSpan.textContent = `${Math.abs(percent).toFixed(1)}%`;
+        percentSpan.className = `text-xs font-bold ${colorClass}`;
+      };
+
+      updateTile("value-total", "trend-total", "icon-total", totalSelected, totalPrev);
+      updateTile("value-active", "trend-active", "icon-active", activeSelected, activePrev);
+      updateTile("value-completed", "trend-completed", "icon-completed", completedSelected, completedPrev);
+    } catch (error) {
+      console.error("Stats Error", error);
+    }
+  }
 
   // 3. CHARTS
   async function populateFeeders(listId) {
@@ -323,10 +391,15 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    const sDate = `${toISODate(currentStartDate)}T00:00:00Z`;
+    const eDate = `${toISODate(currentEndDate)}T23:59:59Z`;
+
     const { data, error } = await supabase
       .from("announcements")
       .select("feeder_id, feeders(name)")
-      .in("feeder_id", checked);
+      .in("feeder_id", checked)
+      .gte("created_at", sDate)
+      .lte("created_at", eDate);
 
     if (error || !data) return;
 
@@ -378,12 +451,17 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    const sDate = `${toISODate(currentStartDate)}T00:00:00Z`;
+    const eDate = `${toISODate(currentEndDate)}T23:59:59Z`;
+
     const { data, error } = await supabase
       .from("announcements")
       .select("created_at, restored_at, feeder_id, feeders(name)")
       .eq("status", "Completed")
       .in("feeder_id", checked)
-      .not("restored_at", "is", null);
+      .not("restored_at", "is", null)
+      .gte("created_at", sDate)
+      .lte("created_at", eDate);
 
     if (error || !data) return;
 
@@ -449,9 +527,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const isDark = document.documentElement.classList.contains("dark");
     const textColor = isDark ? "#e5e7eb" : "#374151";
 
+    const sDate = `${toISODate(currentStartDate)}T00:00:00Z`;
+    const eDate = `${toISODate(currentEndDate)}T23:59:59Z`;
+
     const { data: allAnnouncements, error } = await supabase
       .from("announcements")
       .select("cause, areas_affected, created_at, restored_at, status, feeder_id, feeders(name)")
+      .gte("created_at", sDate)
+      .lte("created_at", eDate)
       .order("created_at", { ascending: true });
 
     if (error || !allAnnouncements) return;
@@ -989,9 +1072,14 @@ document.addEventListener("DOMContentLoaded", () => {
       </tr>
     `;
 
+    const sDate = `${toISODate(currentStartDate)}T00:00:00Z`;
+    const eDate = `${toISODate(currentEndDate)}T23:59:59Z`;
+
     const { data, error } = await supabase
       .from("announcements")
       .select("*")
+      .gte("created_at", sDate)
+      .lte("created_at", eDate)
       .order("created_at", { ascending: false })
       .limit(6);
 
@@ -999,7 +1087,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (error || !data || data.length === 0) {
       reportsTableBody.innerHTML = `
         <tr>
-          <td colspan="6" class="text-center py-4 text-gray-500">No recent announcements.</td>
+          <td colspan="6" class="text-center py-4 text-gray-500">No reports found in this date range.</td>
         </tr>
       `;
       return;
@@ -1113,9 +1201,8 @@ document.addEventListener("DOMContentLoaded", () => {
       updateRestorationChart
     );
 
-    loadDashboardStats();
-    loadRecentReports();
-    loadAdvancedAnalytics();
+    // Initial Data Load
+    refreshAllData();
 
     await Promise.all([
       populateFeeders("feederList"),
@@ -1156,10 +1243,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const data = chartInstance.data.datasets[0].data;
     const labels = chartInstance.data.labels;
-    
-    // 2. Safety Check: If labels are missing
+
+    // Peak chart uses bubble points and does not rely on labels
+    if (type === "peak") {
+      const dataset = chartInstance.data.datasets[0].data;
+      if (!dataset || dataset.length === 0) return "No peak data recorded.";
+
+      const maxBubble = dataset.reduce((prev, current) =>
+        prev.r > current.r ? prev : current
+      , { r: 0 });
+
+      if (maxBubble.r === 0) return "No significant peak times detected.";
+
+      const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const dayName = days[maxBubble.y] || "Unknown Day";
+      return `Highest outage frequency observed on ${dayName}s around ${maxBubble.x}:00 hours. Schedule additional standby crews during this window.`;
+    }
+
+    // 2. Safety Check: If labels are missing (for non-peak charts)
     if (!labels || labels.length === 0) {
-        return "Data available, but labels are missing.";
+      return "Data available, but labels are missing.";
     }
 
     // Helper to safely get the name associated with max value
@@ -1219,22 +1322,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return `${top.name} is the most frequently affected community. Engage with community leaders regarding upcoming improvements.`;
     }
 
-    if (type === "peak") {
-      // Peak uses bubble data {x, y, r}, handled differently
-      const dataset = chartInstance.data.datasets[0].data;
-      if (!dataset || dataset.length === 0) return "No peak data recorded.";
-      
-      const maxBubble = dataset.reduce((prev, current) =>
-        prev.r > current.r ? prev : current
-      , {r: 0}); // initial value
-
-      if (maxBubble.r === 0) return "No significant peak times detected.";
-
-      const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-      // Safety check for day index
-      const dayName = days[maxBubble.y] || "Unknown Day";
-      return `Highest outage frequency observed on ${dayName}s around ${maxBubble.x}:00 hours. Schedule additional standby crews during this window.`;
-    }
+    
 
     if (type === "feederForecast") {
       if (!top) return "Forecast: Risk data inconclusive.";
@@ -1314,7 +1402,7 @@ document.addEventListener("DOMContentLoaded", () => {
     doc.setTextColor(100);
     doc.setFont("helvetica", "normal");
     doc.text(
-      `Generated by: ${adminEmail} | Date: ${new Date().toLocaleString()}`,
+      `Generated by: ${adminEmail} | Range: ${rangeStartInput.value} to ${rangeEndInput.value}`,
       pageWidth / 2,
       yPos,
       { align: "center" }
@@ -1339,7 +1427,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // EXEC SUMMARY (tiles)
     doc.setTextColor(0);
     doc.setFontSize(14);
-    doc.text("1. Executive Summary vs. Yesterday", margin, yPos);
+    doc.text("1. Executive Summary (Selected Period)", margin, yPos);
     yPos += 10;
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
